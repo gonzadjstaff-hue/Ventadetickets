@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma, TicketStatus } from "@prisma/client";
 
 import { prisma } from "../../src/shared/prisma.js";
+import { generateQrToken } from "../../src/shared/qrToken.js";
 
 export async function createFixtureEvent(overrides: Partial<Prisma.EventCreateInput> = {}) {
   const suffix = randomUUID().slice(0, 8);
@@ -57,4 +58,92 @@ export async function cleanupEvent(eventId: string): Promise<void> {
 
 export async function cleanupUserByEmail(email: string): Promise<void> {
   await prisma.user.deleteMany({ where: { email } });
+}
+
+export async function createFixtureUser(overrides: Partial<Prisma.UserCreateInput> = {}) {
+  const suffix = randomUUID().slice(0, 8);
+
+  return prisma.user.create({
+    data: {
+      email: `fixture-${suffix}@test.pulse.local`,
+      displayName: `Fixture User ${suffix}`,
+      ...overrides,
+    },
+  });
+}
+
+/**
+ * Usuario "sistema" fijo para check-in (mismo ID que sembra prisma/seed.ts y
+ * que usa DEV_VALIDATOR_USER_ID en modules/check-in/service.ts). upsert
+ * porque en tests conviene poder llamarlo varias veces sin duplicar.
+ */
+export async function createFixtureValidatorUser() {
+  return prisma.user.upsert({
+    where: { id: "demo-validator-mvp" },
+    update: {},
+    create: {
+      id: "demo-validator-mvp",
+      email: "validador-mvp@test.pulse.local",
+      displayName: "Validador MVP (demo)",
+      role: "VALIDATOR",
+    },
+  });
+}
+
+export async function createFixtureOrder(
+  eventId: string,
+  userId: string,
+  overrides: Partial<Prisma.OrderUncheckedCreateInput> = {},
+) {
+  return prisma.order.create({
+    data: {
+      eventId,
+      userId,
+      status: "PAID",
+      subtotal: 0,
+      total: 0,
+      ...overrides,
+    },
+  });
+}
+
+/**
+ * Crea un OrderItem + Ticket directamente (sin pasar por el flujo HTTP de
+ * registro), para poder construir tickets en cualquier estado que necesiten
+ * los tests de check-in. Devuelve también el token crudo (nunca persistido)
+ * para poder armar el qrPayload `pulse-ticket:v1:<token>` en el test.
+ */
+export async function createFixtureTicket(params: {
+  orderId: string;
+  ticketTypeId: string;
+  status?: TicketStatus;
+  overrides?: Partial<Prisma.TicketUncheckedCreateInput>;
+}) {
+  const { token, hash } = generateQrToken();
+  const suffix = randomUUID().slice(0, 8);
+
+  const orderItem = await prisma.orderItem.create({
+    data: {
+      orderId: params.orderId,
+      ticketTypeId: params.ticketTypeId,
+      quantity: 1,
+      unitPrice: 0,
+      subtotal: 0,
+    },
+  });
+
+  const ticket = await prisma.ticket.create({
+    data: {
+      orderId: params.orderId,
+      orderItemId: orderItem.id,
+      ticketTypeId: params.ticketTypeId,
+      holderName: "Fixture Holder",
+      holderEmail: `fixture-ticket-${suffix}@test.pulse.local`,
+      qrTokenHash: hash,
+      status: params.status ?? "ACTIVE",
+      ...params.overrides,
+    },
+  });
+
+  return { ticket, rawToken: token };
 }

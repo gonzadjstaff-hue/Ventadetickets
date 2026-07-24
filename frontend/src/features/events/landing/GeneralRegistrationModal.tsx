@@ -11,6 +11,7 @@ import {
   generalRegistrationFormSchema,
   type GeneralRegistrationFormValues,
 } from "./generalRegistrationSchema";
+import TicketQrCode from "./TicketQrCode";
 
 const FORM_FIELDS = ["firstName", "lastName", "email", "phone", "acceptedTerms"] as const;
 
@@ -96,6 +97,9 @@ export default function GeneralRegistrationModal({ open, onClose }: GeneralRegis
               {result.attendeeName}, tu entrada <span className="text-[#4ADE80]">{result.ticketType}</span> quedó
               confirmada.
             </p>
+
+            <TicketQrCode token={result.ticketToken} ticketPublicId={result.ticketPublicId} />
+
             <button
               type="button"
               onClick={onClose}

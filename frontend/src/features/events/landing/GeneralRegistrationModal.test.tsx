@@ -11,6 +11,14 @@ vi.mock("../../../api/registrations", () => ({
   registerGeneralTicket: vi.fn(),
 }));
 
+const { mockedToDataURL } = vi.hoisted(() => ({
+  mockedToDataURL: vi.fn<(text: string, options?: Record<string, unknown>) => Promise<string>>(),
+}));
+
+vi.mock("qrcode", () => ({
+  toDataURL: mockedToDataURL,
+}));
+
 const mockedRegister = vi.mocked(registerGeneralTicket);
 
 function renderModal(open = true) {
@@ -44,6 +52,8 @@ const successResponse: GeneralRegistrationResponse = {
 describe("GeneralRegistrationModal", () => {
   beforeEach(() => {
     mockedRegister.mockReset();
+    mockedToDataURL.mockReset();
+    mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
   });
 
   it("no renderiza nada si open es false", () => {
@@ -131,5 +141,107 @@ describe("GeneralRegistrationModal", () => {
     await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
 
     expect(await screen.findByText(/no pudimos conectar con el servidor/i)).toBeInTheDocument();
+  });
+
+  it("muestra el QR recién después de un registro exitoso", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue(successResponse);
+
+    renderModal();
+
+    expect(screen.queryByAltText(/código qr de tu entrada/i)).not.toBeInTheDocument();
+
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
+    expect(mockedToDataURL).toHaveBeenCalledWith(
+      `pulse-ticket:v1:${successResponse.ticketToken}`,
+      expect.anything(),
+    );
+  });
+
+  it("el QR no aparece antes de que el registro sea exitoso", async () => {
+    const user = userEvent.setup();
+    let resolvePromise: (value: GeneralRegistrationResponse) => void = () => {};
+    mockedRegister.mockReturnValue(
+      new Promise<GeneralRegistrationResponse>((resolve) => {
+        resolvePromise = resolve;
+      }),
+    );
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    // Mientras el registro está en curso (pendiente), no debe existir ningún QR.
+    expect(screen.queryByAltText(/código qr de tu entrada/i)).not.toBeInTheDocument();
+
+    resolvePromise(successResponse);
+    expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
+  });
+
+  it("el botón de descarga del QR aparece con el nombre de archivo correcto", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue(successResponse);
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    const downloadLink = await screen.findByRole("link", { name: /descargar qr/i });
+    expect(downloadLink).toHaveAttribute("download", `pulse-event-${successResponse.ticketPublicId}.png`);
+  });
+
+  it("al cerrar y reabrir el modal no queda el QR de la vez anterior", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue(successResponse);
+
+    const queryClient = new QueryClient();
+    const onClose = vi.fn();
+
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <GeneralRegistrationModal key="instance-1" open={true} onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+    await screen.findByAltText(/código qr de tu entrada/i);
+
+    // Cerrar (mismo estado del componente, solo open=false).
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GeneralRegistrationModal key="instance-1" open={false} onClose={onClose} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Reabrir con una key distinta: mismo mecanismo de remount que usa
+    // TicketTypes.tsx en la app real cada vez que se abre el modal.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GeneralRegistrationModal key="instance-2" open={true} onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^entrada general$/i })).toBeInTheDocument();
+    expect(screen.queryByAltText(/código qr de tu entrada/i)).not.toBeInTheDocument();
+  });
+
+  it("no persiste nada en localStorage ni sessionStorage durante todo el flujo", async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue(successResponse);
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+    await screen.findByAltText(/código qr de tu entrada/i);
+
+    expect(setItemSpy).not.toHaveBeenCalled();
+    setItemSpy.mockRestore();
   });
 });

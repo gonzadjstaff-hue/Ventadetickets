@@ -4,6 +4,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
 import { env } from "./config/env.js";
+import { errorHandler } from "./middlewares/errorHandler.js";
+import { registrationsRouter } from "./modules/registrations/routes.js";
 
 export function createApp(): Express {
   const app = express();
@@ -30,6 +32,10 @@ export function createApp(): Express {
       timestamp: new Date().toISOString(),
     });
   });
+
+  app.use("/api/events", registrationsRouter);
+
+  app.use(errorHandler);
 
   return app;
 }

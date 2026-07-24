@@ -68,7 +68,7 @@ enum CheckInResult {
 
 model User {
   id          String     @id @default(cuid())
-  firebaseUid String     @unique
+  firebaseUid String?    @unique
   email       String     @unique
   displayName String?
   phone       String?

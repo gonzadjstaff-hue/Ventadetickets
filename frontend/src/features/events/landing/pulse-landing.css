@@ -316,6 +316,30 @@
   filter: blur(34px);
 }
 
+/* Entrada descargable (EventTicket): clases propias, no compartidas con el
+ * mockup del hero (.pulse-ticket-*), para poder ajustar su diseño sin afectar
+ * la tarjeta VIP de la landing. */
+.pulse-ticket-dl-border {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  box-shadow:
+    0 40px 90px -30px rgba(74, 222, 128, 0.45),
+    0 20px 60px -20px rgba(124, 58, 237, 0.4);
+}
+
+.pulse-ticket-dl-inner {
+  background: linear-gradient(160deg, #101512 0%, #0b0b0d 60%, #0d0a14 100%);
+}
+
+.pulse-ticket-dl-glow-green {
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.13), transparent 70%);
+  filter: blur(38px);
+}
+
+.pulse-ticket-dl-glow-violet {
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.14), transparent 70%);
+  filter: blur(42px);
+}
+
 .pulse-ticket-vip-badge {
   background: linear-gradient(135deg, #8a6116 0%, var(--pulse-gold) 45%, #fff0a8 100%);
   color: #2a1e05;

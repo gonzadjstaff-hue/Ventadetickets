@@ -59,26 +59,26 @@ export default function EventTicket({ token, attendeeName, ticketType, ticketPub
             width: TICKET_EXPORT_WIDTH,
             boxSizing: "border-box",
           }}
-          className="pulse-ticket-border mx-auto rounded-[26px] p-[1.5px]"
+          className="pulse-ticket-dl-border mx-auto rounded-[26px] p-[1.5px]"
         >
-          <div className="pulse-ticket-inner relative overflow-hidden rounded-[25px]">
-            <div className="pulse-ticket-glow-green absolute -top-[35%] -left-[25%] h-[70%] w-[70%]" />
-            <div className="pulse-ticket-glow-violet absolute -bottom-[25%] -right-[20%] h-[60%] w-[60%]" />
+          <div className="pulse-ticket-dl-inner relative overflow-hidden rounded-[25px]">
+            <div className="pulse-ticket-dl-glow-green absolute -top-[35%] -left-[25%] h-[45%] w-[45%]" />
+            <div className="pulse-ticket-dl-glow-violet absolute -bottom-[25%] -right-[20%] h-[42%] w-[42%]" />
 
-            <div className="relative border-b border-dashed border-[rgba(170,181,190,.28)] px-6 pb-4 pt-6 text-center">
+            <div className="relative border-b border-dashed border-[rgba(170,181,190,.28)] px-6 pb-3 pt-5 text-center">
               <p className="text-lg font-black uppercase tracking-[.14em] text-[#E8EEF2]">Pulse Event</p>
               <p className="mt-1 text-[.62rem] font-semibold uppercase tracking-[.22em] text-[#AAB5BE]">
                 Entrada digital
               </p>
             </div>
 
-            <div className="relative px-6 py-5 text-center">
+            <div className="relative px-6 py-4 text-center">
               <p className="text-xl font-extrabold leading-tight text-[#E8EEF2]">{eventInfo.name}</p>
-              <p className="mt-2 text-sm font-medium text-[#AAB5BE]">{eventInfo.date}</p>
+              <p className="mt-1.5 text-sm font-medium text-[#AAB5BE]">{eventInfo.date}</p>
               <p className="text-sm font-medium text-[#AAB5BE]">{eventInfo.venue}</p>
             </div>
 
-            <div className="relative flex justify-center px-6 pb-5">
+            <div className="relative flex justify-center px-6 pb-4">
               <TicketQrCode
                 token={token}
                 onReady={() => {
@@ -98,17 +98,17 @@ export default function EventTicket({ token, attendeeName, ticketType, ticketPub
               <div className="mx-3.5 border-t-2 border-dashed border-[rgba(170,181,190,.28)]" />
             </div>
 
-            <div className="relative flex flex-col gap-3 px-6 py-5">
+            <div className="relative flex flex-col gap-2.5 px-6 py-4">
               <DetailRow label="Tipo de entrada" value={`Entrada ${ticketType}`} accent />
               <DetailRow label="Asistente" value={attendeeName} />
               <DetailRow label="N.º de ticket" value={ticketPublicId} mono />
             </div>
 
-            <div className="relative bg-[rgba(170,181,190,.06)] px-6 py-4">
+            <div className="relative bg-[rgba(170,181,190,.06)] px-6 py-3">
               <p className="text-[.6rem] font-bold uppercase tracking-[.18em] text-[#7d8790]">
                 Información importante
               </p>
-              <p className="mt-2 text-[.78rem] leading-[1.5] text-[#AAB5BE]">
+              <p className="mt-1.5 text-[.78rem] leading-[1.35] text-[#AAB5BE]">
                 Entrada personal e intransferible. Presentá este código QR en el ingreso, desde tu teléfono o
                 impreso. Te recomendamos llegar con anticipación.
               </p>
@@ -151,12 +151,14 @@ function DetailRow({
   mono?: boolean;
 }): ReactNode {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-1 text-left">
       <p className="text-[.62rem] font-semibold uppercase tracking-[.16em] text-[#7d8790]">{label}</p>
 
       <p
-        className={`truncate text-right text-[.9rem] font-bold ${accent ? "text-[#4ADE80]" : "text-[#E8EEF2]"
-          } ${mono ? "font-mono tracking-[.05em]" : ""}`}
+        style={mono ? { overflowWrap: "anywhere" } : undefined}
+        className={`font-bold ${mono ? "text-[.78rem] font-mono tracking-[.04em] break-all" : "text-[.9rem]"} ${
+          accent ? "text-[#4ADE80]" : "text-[#E8EEF2]"
+        }`}
       >
         {value}
       </p>

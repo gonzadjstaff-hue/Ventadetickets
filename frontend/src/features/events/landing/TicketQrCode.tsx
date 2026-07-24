@@ -32,7 +32,7 @@ export default function TicketQrCode({ token, onReady, onError }: TicketQrCodePr
   useEffect(() => {
     let cancelled = false;
 
-    toDataURL(buildQrContent(token), { width: 220, margin: 1, color: QR_COLOR })
+    toDataURL(buildQrContent(token), { width: 190, margin: 1, color: QR_COLOR })
       .then((url) => {
         if (cancelled) return;
         setDataUrl(url);
@@ -64,14 +64,14 @@ export default function TicketQrCode({ token, onReady, onError }: TicketQrCodePr
       <div
         role="status"
         aria-label="Generando código QR"
-        className="h-[180px] w-[180px] animate-pulse rounded-xl bg-[rgba(170,181,190,.1)]"
+        className="h-[156px] w-[156px] animate-pulse rounded-xl bg-[rgba(170,181,190,.1)]"
       />
     );
   }
 
   return (
-    <div className="rounded-xl bg-[#E8EEF2] p-3 shadow-[0_8px_22px_-8px_rgba(0,0,0,.6)]">
-      <img src={dataUrl} alt="Código QR de tu entrada" width={180} height={180} className="block h-[180px] w-[180px]" />
+    <div className="rounded-xl bg-[#E8EEF2] p-2.5 shadow-[0_8px_22px_-8px_rgba(0,0,0,.6)]">
+      <img src={dataUrl} alt="Código QR de tu entrada" width={156} height={156} className="block h-[156px] w-[156px]" />
     </div>
   );
 }

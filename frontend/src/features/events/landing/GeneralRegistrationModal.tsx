@@ -98,6 +98,15 @@ export default function GeneralRegistrationModal({ open, onClose }: GeneralRegis
               confirmada.
             </p>
 
+            {(result.emailStatus === "failed" || result.emailStatus === "disabled") && (
+              <p role="alert" className="rounded-lg bg-[rgba(246,196,83,.12)] px-3 py-2 text-sm text-[#F6C453]">
+                Tu entrada fue creada, pero no pudimos enviar el email.
+              </p>
+            )}
+            {result.emailStatus === "simulated" && import.meta.env.DEV && (
+              <p className="text-xs text-[#7d8790]">Envío de email simulado (modo desarrollo).</p>
+            )}
+
             <EventTicket
               token={result.ticketToken}
               attendeeName={result.attendeeName}

@@ -1,16 +1,33 @@
 import { randomUUID } from "node:crypto";
 
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createApp } from "../src/app.js";
-import { prisma } from "../src/shared/prisma.js";
+import type { EmailDeliveryResult } from "../src/integrations/email/types.js";
 import {
   cleanupEvent,
   cleanupUserByEmail,
   createFixtureEvent,
   createFixtureTicketType,
 } from "./helpers/fixtures.js";
+
+// Mockeado acá (y no dejado pegarle al proveedor real) para que estos tests
+// no dependan de red, y para que las aserciones de "el email no revierte
+// nada" puedan controlar exactamente qué status devuelve. Además, tenerlo en
+// el MISMO archivo que el resto del flujo de registro (en vez de un archivo
+// aparte) evita que dos suites de tests corran en paralelo contra la misma
+// transacción Serializable del endpoint, lo que generaba conflictos 40001 /
+// P2034 espurios entre archivos.
+const { mockedSendGeneralTicketEmail } = vi.hoisted(() => ({
+  mockedSendGeneralTicketEmail: vi.fn<(...args: unknown[]) => Promise<EmailDeliveryResult>>(),
+}));
+
+vi.mock("../src/integrations/email/emailService.js", () => ({
+  sendGeneralTicketEmail: mockedSendGeneralTicketEmail,
+}));
+
+const { createApp } = await import("../src/app.js");
+const { prisma } = await import("../src/shared/prisma.js");
 
 const app = createApp();
 
@@ -38,6 +55,11 @@ describe("POST /api/events/:eventPublicId/registrations/general", () => {
   beforeAll(async () => {
     event = await createFixtureEvent();
     generalType = await createFixtureTicketType(event.id, { name: "General", price: 0 });
+  });
+
+  beforeEach(() => {
+    mockedSendGeneralTicketEmail.mockReset();
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "disabled" });
   });
 
   afterAll(async () => {
@@ -224,5 +246,97 @@ describe("POST /api/events/:eventPublicId/registrations/general", () => {
       where: { ticketTypeId: concurrentType.id, holderEmail: email },
     });
     expect(ticketCount).toBe(1);
+  });
+
+  it("email enviado: responde 201 con emailStatus 'sent' y emailSent true", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "sent" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailStatus).toBe("sent");
+    expect(res.body.emailSent).toBe(true);
+    expect(typeof res.body.ticketToken).toBe("string");
+  });
+
+  it("proveedor de email falla: el registro sigue siendo 201, con emailStatus 'failed' y emailSent false", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "failed" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailStatus).toBe("failed");
+    expect(res.body.emailSent).toBe(false);
+    // La descarga sigue disponible: el ticketToken se devuelve igual.
+    expect(typeof res.body.ticketToken).toBe("string");
+    expect(res.body.ticketToken.length).toBeGreaterThan(20);
+  });
+
+  it("la falla de email no revierte Order ni Ticket, y no crea Payment", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "failed" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+    expect(res.status).toBe(201);
+
+    const order = await prisma.order.findUnique({ where: { publicId: res.body.orderPublicId } });
+    expect(order?.status).toBe("PAID");
+
+    const ticket = await prisma.ticket.findUnique({ where: { publicId: res.body.ticketPublicId } });
+    expect(ticket?.status).toBe("ACTIVE");
+    expect(ticket?.qrTokenHash).toBeTruthy();
+    expect(ticket?.qrTokenHash).not.toBe(res.body.ticketToken);
+
+    const paymentCount = await prisma.payment.count({ where: { orderId: order?.id } });
+    expect(paymentCount).toBe(0);
+  });
+
+  it("modo console: emailStatus 'simulated' y emailSent false (no es 'sent')", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "simulated" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailStatus).toBe("simulated");
+    expect(res.body.emailSent).toBe(false);
+  });
+
+  it("integración deshabilitada: emailStatus 'disabled' y emailSent false, registro igual exitoso", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "disabled" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailStatus).toBe("disabled");
+    expect(res.body.emailSent).toBe(false);
+  });
+
+  it("se llama a sendGeneralTicketEmail con los datos del evento y el token crudo recién emitido", async () => {
+    mockedSendGeneralTicketEmail.mockResolvedValue({ status: "sent" });
+    const payload = validPayload(generalType.id);
+    createdEmails.push(payload.email);
+
+    const res = await request(app).post(`/api/events/${event.publicId}/registrations/general`).send(payload);
+    expect(res.status).toBe(201);
+
+    expect(mockedSendGeneralTicketEmail).toHaveBeenCalledTimes(1);
+    const [emailInput] = mockedSendGeneralTicketEmail.mock.calls[0] as [Record<string, unknown>];
+    expect(emailInput).toMatchObject({
+      to: payload.email,
+      attendeeName: "Ada Lovelace",
+      eventTitle: event.title,
+      ticketTypeName: "General",
+      ticketPublicId: res.body.ticketPublicId,
+      ticketToken: res.body.ticketToken,
+    });
   });
 });

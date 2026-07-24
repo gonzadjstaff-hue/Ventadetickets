@@ -52,6 +52,8 @@ const successResponse: GeneralRegistrationResponse = {
   ticketToken: "raw-token-nunca-visible",
   ticketType: "General",
   message: "¡Listo! Tu entrada General quedó confirmada.",
+  emailStatus: "sent",
+  emailSent: true,
 };
 
 describe("GeneralRegistrationModal", () => {
@@ -249,5 +251,58 @@ describe("GeneralRegistrationModal", () => {
 
     expect(setItemSpy).not.toHaveBeenCalled();
     setItemSpy.mockRestore();
+  });
+
+  it("emailStatus 'sent': mensaje normal de éxito, sin advertencia de email", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue(successResponse);
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    expect(await screen.findByRole("heading", { name: /quedó confirmada/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no pudimos enviar el email/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/envío de email simulado/i)).not.toBeInTheDocument();
+  });
+
+  it("emailStatus 'failed': muestra la advertencia y conserva la descarga", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue({ ...successResponse, emailStatus: "failed", emailSent: false });
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    expect(await screen.findByText("Tu entrada fue creada, pero no pudimos enviar el email.")).toBeInTheDocument();
+    expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /descargar entrada/i })).toBeInTheDocument();
+  });
+
+  it("emailStatus 'disabled': muestra la misma advertencia y conserva la descarga", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue({ ...successResponse, emailStatus: "disabled", emailSent: false });
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    expect(await screen.findByText("Tu entrada fue creada, pero no pudimos enviar el email.")).toBeInTheDocument();
+    expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /descargar entrada/i })).toBeInTheDocument();
+  });
+
+  it("emailStatus 'simulated': muestra una indicación discreta (modo desarrollo) y conserva la descarga", async () => {
+    const user = userEvent.setup();
+    mockedRegister.mockResolvedValue({ ...successResponse, emailStatus: "simulated", emailSent: false });
+
+    renderModal();
+    await fillValidForm(user);
+    await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+
+    expect(await screen.findByText(/envío de email simulado/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no pudimos enviar el email/i)).not.toBeInTheDocument();
+    expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /descargar entrada/i })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
 
+import { env } from "../../config/env.js";
+import { sendGeneralTicketEmail, type EmailDeliveryStatus } from "../../integrations/email/emailService.js";
 import { prisma } from "../../shared/prisma.js";
 import { generateQrToken } from "../../shared/qrToken.js";
 import {
@@ -22,6 +24,7 @@ export interface GeneralRegistrationResult {
   /** Token crudo de un solo uso. Se devuelve acá y nunca se vuelve a poder recuperar. */
   ticketToken: string;
   ticketTypeName: string;
+  emailStatus: EmailDeliveryStatus;
 }
 
 export async function registerGeneralTicket(
@@ -47,8 +50,9 @@ export async function registerGeneralTicket(
   // Generado antes de la transacción: no depende del estado de la base.
   const { token, hash } = generateQrToken();
 
+  let created: Omit<GeneralRegistrationResult, "emailStatus">;
   try {
-    return await prisma.$transaction(
+    created = await prisma.$transaction(
       async (tx) => {
         const existingTicket = await tx.ticket.findFirst({
           where: {
@@ -131,4 +135,25 @@ export async function registerGeneralTicket(
     }
     throw error;
   }
+
+  // Se envía después de que la transacción ya confirmó: una demora o falla
+  // del proveedor de email nunca puede revertir la orden ni el ticket, ni
+  // convertir este registro exitoso en un error para el cliente.
+  const { status: emailStatus } = await sendGeneralTicketEmail(
+    {
+      to: input.email,
+      attendeeName: created.attendeeName,
+      eventTitle: event.title,
+      eventStartsAt: event.startsAt,
+      eventVenueName: event.venueName,
+      eventAddress: event.address,
+      ticketTypeName: created.ticketTypeName,
+      ticketPublicId: created.ticketPublicId,
+      ticketToken: created.ticketToken,
+    },
+    { provider: env.EMAIL_PROVIDER, apiKey: env.EMAIL_API_KEY, from: env.EMAIL_FROM },
+    env.EVENT_TIMEZONE,
+  );
+
+  return { ...created, emailStatus };
 }

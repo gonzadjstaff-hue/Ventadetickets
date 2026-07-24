@@ -9,6 +9,8 @@ export interface GeneralRegistrationPayload {
   acceptedTerms: boolean;
 }
 
+export type EmailDeliveryStatus = "sent" | "simulated" | "disabled" | "failed";
+
 export interface GeneralRegistrationResponse {
   attendeeName: string;
   orderPublicId: string;
@@ -17,6 +19,10 @@ export interface GeneralRegistrationResponse {
   ticketToken: string;
   ticketType: string;
   message: string;
+  /** Estado real del envío del email de la entrada. La descarga y el QR no dependen de esto. */
+  emailStatus: EmailDeliveryStatus;
+  /** Atajo de conveniencia: equivalente a emailStatus === "sent". */
+  emailSent: boolean;
 }
 
 export function registerGeneralTicket(

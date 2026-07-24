@@ -19,6 +19,8 @@ export async function createGeneralRegistration(
       ticketToken: result.ticketToken,
       ticketType: result.ticketTypeName,
       message: "¡Listo! Tu entrada General quedó confirmada.",
+      emailStatus: result.emailStatus,
+      emailSent: result.emailStatus === "sent",
     });
   } catch (error) {
     next(error);

@@ -1,5 +1,7 @@
 import { Check } from "lucide-react";
+import { useState } from "react";
 
+import GeneralRegistrationModal from "./GeneralRegistrationModal";
 import { iconMap } from "./icons";
 import { ticketTypes, type PlanVariant, type TicketPlan } from "./mockData";
 import { useRevealRef } from "./useRevealRef";
@@ -34,10 +36,19 @@ const variantClasses: Record<
   },
 };
 
-function TicketPlanCard({ plan, index }: { plan: TicketPlan; index: number }) {
+function TicketPlanCard({
+  plan,
+  index,
+  onSelectGeneral,
+}: {
+  plan: TicketPlan;
+  index: number;
+  onSelectGeneral: () => void;
+}) {
   const ref = useRevealRef<HTMLDivElement>((index % 3) * 0.08);
   const styles = variantClasses[plan.variant];
   const Icon = iconMap[plan.icon];
+  const isGeneral = plan.id === "general";
 
   return (
     <div
@@ -69,18 +80,38 @@ function TicketPlanCard({ plan, index }: { plan: TicketPlan; index: number }) {
             </li>
           ))}
         </ul>
-        <a
-          href="#final"
-          className={`pulse-ticket-cta mt-auto rounded-full py-[15px] text-center text-[.95rem] font-extrabold uppercase tracking-[.06em] ${styles.cta}`}
-        >
-          {plan.ctaLabel}
-        </a>
+        {isGeneral ? (
+          <button
+            type="button"
+            onClick={onSelectGeneral}
+            className={`pulse-ticket-cta mt-auto rounded-full py-[15px] text-center text-[.95rem] font-extrabold uppercase tracking-[.06em] ${styles.cta}`}
+          >
+            {plan.ctaLabel}
+          </button>
+        ) : (
+          <a
+            href="#final"
+            className={`pulse-ticket-cta mt-auto rounded-full py-[15px] text-center text-[.95rem] font-extrabold uppercase tracking-[.06em] ${styles.cta}`}
+          >
+            {plan.ctaLabel}
+          </a>
+        )}
       </div>
     </div>
   );
 }
 
 export default function TicketTypes() {
+  const [isGeneralModalOpen, setGeneralModalOpen] = useState(false);
+  // Cambia en cada apertura para forzar un remount del modal (formulario y
+  // resultado limpios), en vez de resetear estado manualmente en un efecto.
+  const [generalModalInstance, setGeneralModalInstance] = useState(0);
+
+  const openGeneralModal = () => {
+    setGeneralModalInstance((instance) => instance + 1);
+    setGeneralModalOpen(true);
+  };
+
   return (
     <section id="tickets" className="relative bg-[#0C0C0C] px-6 py-[clamp(60px,10vh,130px)]">
       <div className="mx-auto max-w-[1200px]">
@@ -94,10 +125,16 @@ export default function TicketTypes() {
         </h2>
         <div className="mt-[clamp(40px,6vh,72px)] grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-stretch gap-6">
           {ticketTypes.map((plan, i) => (
-            <TicketPlanCard key={plan.id} plan={plan} index={i} />
+            <TicketPlanCard key={plan.id} plan={plan} index={i} onSelectGeneral={openGeneralModal} />
           ))}
         </div>
       </div>
+
+      <GeneralRegistrationModal
+        key={generalModalInstance}
+        open={isGeneralModalOpen}
+        onClose={() => setGeneralModalOpen(false)}
+      />
     </section>
   );
 }

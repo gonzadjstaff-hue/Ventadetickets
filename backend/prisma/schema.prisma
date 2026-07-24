@@ -1,0 +1,258 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  VALIDATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  CANCELLED
+  FINISHED
+}
+
+enum TicketTypeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OrderStatus {
+  PENDING
+  AWAITING_PAYMENT
+  PAID
+  REJECTED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  REFUNDED
+}
+
+enum TicketStatus {
+  ACTIVE
+  USED
+  CANCELLED
+  REFUNDED
+  EXPIRED
+}
+
+enum CheckInResult {
+  VALID
+  ALREADY_USED
+  INVALID
+  WRONG_EVENT
+  NOT_PAID
+  CANCELLED
+}
+
+model User {
+  id          String     @id @default(cuid())
+  firebaseUid String     @unique
+  email       String     @unique
+  displayName String?
+  phone       String?
+  role        UserRole   @default(USER)
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  orders     Order[]
+  checkIns   CheckIn[]
+  auditLogs  AuditLog[]
+}
+
+model Event {
+  id            String      @id @default(cuid())
+  publicId      String      @unique @default(cuid())
+  title         String
+  slug          String      @unique
+  description   String
+  coverImageUrl String?
+  venueName     String
+  address       String
+  startsAt      DateTime
+  endsAt        DateTime
+  salesStartAt  DateTime
+  salesEndAt    DateTime
+  capacity      Int
+  status        EventStatus @default(DRAFT)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  ticketTypes TicketType[]
+  orders      Order[]
+  checkIns    CheckIn[]
+}
+
+model TicketType {
+  id            String            @id @default(cuid())
+  eventId       String
+  name          String
+  description   String?
+  price         Decimal           @db.Decimal(10, 2)
+  currency      String            @default("ARS")
+  capacity      Int
+  maxPerOrder   Int
+  salesStartAt  DateTime
+  salesEndAt    DateTime
+  status        TicketTypeStatus  @default(ACTIVE)
+  sortOrder     Int               @default(0)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  event      Event       @relation(fields: [eventId], references: [id])
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@index([eventId])
+}
+
+model Order {
+  id                 String      @id @default(cuid())
+  publicId           String      @unique @default(cuid())
+  userId             String
+  eventId            String
+  status             OrderStatus @default(PENDING)
+  currency           String      @default("ARS")
+  subtotal           Decimal     @db.Decimal(10, 2)
+  total              Decimal     @db.Decimal(10, 2)
+  paymentProvider    String?
+  externalReference  String?
+  expiresAt          DateTime?
+  paidAt             DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id])
+  event    Event       @relation(fields: [eventId], references: [id])
+  items    OrderItem[]
+  payments Payment[]
+  tickets  Ticket[]
+
+  @@index([userId])
+  @@index([eventId])
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  ticketTypeId String
+  quantity     Int
+  unitPrice    Decimal @db.Decimal(10, 2)
+  subtotal     Decimal @db.Decimal(10, 2)
+
+  order      Order      @relation(fields: [orderId], references: [id])
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+
+  @@index([orderId])
+  @@index([ticketTypeId])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String
+  provider          String
+  providerPaymentId String?
+  status            PaymentStatus @default(PENDING)
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("ARS")
+  paymentMethod     String?
+  rawStatus         String?
+  approvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+}
+
+model Ticket {
+  id           String       @id @default(cuid())
+  publicId     String       @unique @default(cuid())
+  orderId      String
+  ticketTypeId String
+  holderName   String
+  holderEmail  String
+  qrTokenHash  String       @unique
+  status       TicketStatus @default(ACTIVE)
+  issuedAt     DateTime     @default(now())
+  usedAt       DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  order      Order       @relation(fields: [orderId], references: [id])
+  ticketType TicketType  @relation(fields: [ticketTypeId], references: [id])
+  checkIns   CheckIn[]
+
+  @@index([orderId])
+  @@index([ticketTypeId])
+}
+
+model CheckIn {
+  id             String        @id @default(cuid())
+  ticketId       String
+  eventId        String
+  validatorUserId String
+  result         CheckInResult
+  checkedAt      DateTime      @default(now())
+  deviceInfo     String?
+  ipAddress      String?
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id])
+  event     Event  @relation(fields: [eventId], references: [id])
+  validator User   @relation(fields: [validatorUserId], references: [id])
+
+  @@index([ticketId])
+  @@index([eventId])
+  @@index([validatorUserId])
+}
+
+model PaymentWebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  externalEventId String
+  eventType       String
+  payload         Json
+  processed       Boolean  @default(false)
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  @@unique([provider, externalEventId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}

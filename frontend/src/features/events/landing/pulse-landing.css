@@ -1,0 +1,465 @@
+.pulse-landing {
+  --pulse-bg: #0c0c0c;
+  --pulse-fg: #e8eef2;
+  --pulse-muted: #aab5be;
+  --pulse-dim: #7d8790;
+  --pulse-green: #4ade80;
+  --pulse-green-dark: #16a34a;
+  --pulse-violet: #7c3aed;
+  --pulse-violet-light: #b794ff;
+  --pulse-gold: #f6c453;
+
+  background: var(--pulse-bg);
+  color: var(--pulse-fg);
+  font-family: "Kanit", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+  position: relative;
+  width: 100%;
+}
+
+.pulse-landing * {
+  box-sizing: border-box;
+}
+
+.pulse-landing ::selection {
+  background: var(--pulse-green);
+  color: #052e16;
+}
+
+.pulse-landing a {
+  color: var(--pulse-fg);
+  text-decoration: none;
+}
+
+/* ==================== keyframes ==================== */
+
+@keyframes pulse-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-18px);
+  }
+}
+
+@keyframes pulse-marquee-l {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes pulse-marquee-r {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes pulse-blob {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -20px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.95);
+  }
+}
+
+.pulse-rise {
+  animation: pulse-rise-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.pulse-float {
+  animation: pulse-float-y 6s ease-in-out infinite;
+}
+
+.pulse-glow {
+  animation: pulse-glow-pulse 5s ease-in-out infinite;
+}
+
+.pulse-blob {
+  animation: pulse-blob 18s ease-in-out infinite;
+}
+
+.pulse-blob-reverse {
+  animation: pulse-blob 22s ease-in-out infinite reverse;
+}
+
+.pulse-marquee-track-l {
+  animation: pulse-marquee-l 42s linear infinite;
+}
+
+.pulse-marquee-track-r {
+  animation: pulse-marquee-r 48s linear infinite;
+}
+
+/* ==================== scroll reveal ==================== */
+
+.pulse-reveal {
+  opacity: 0;
+  transform: translateY(40px);
+  transition:
+    opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pulse-reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ==================== gradient text ==================== */
+
+.pulse-gradient-text {
+  background: linear-gradient(180deg, #6d747e 0%, var(--pulse-fg) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ==================== nav ==================== */
+
+.pulse-nav-links {
+  display: none;
+}
+
+.pulse-nav-menu-btn {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .pulse-nav-links {
+    display: flex;
+  }
+}
+
+.pulse-nav-link {
+  transition: opacity 0.2s;
+}
+
+.pulse-nav-link:hover {
+  opacity: 0.7;
+}
+
+/* ==================== buttons ==================== */
+
+.pulse-btn-primary {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  color: #041b0c;
+  box-shadow: 0 10px 34px -10px rgba(74, 222, 128, 0.6);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+
+.pulse-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px -10px rgba(74, 222, 128, 0.75);
+}
+
+.pulse-btn-hero-cta {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  color: #041b0c;
+  box-shadow:
+    0 0 0 1px rgba(74, 222, 128, 0.3),
+    0 18px 50px -14px rgba(74, 222, 128, 0.65);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+
+.pulse-btn-hero-cta:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow:
+    0 0 0 1px rgba(74, 222, 128, 0.5),
+    0 24px 60px -14px rgba(124, 58, 237, 0.7);
+}
+
+.pulse-btn-outline {
+  border: 1px solid rgba(74, 222, 128, 0.45);
+  background: rgba(74, 222, 128, 0.06);
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+
+.pulse-btn-outline:hover {
+  background: rgba(74, 222, 128, 0.16);
+  transform: translateY(-2px);
+}
+
+.pulse-btn-final-primary {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  color: #041b0c;
+  box-shadow: 0 18px 50px -14px rgba(74, 222, 128, 0.65);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+
+.pulse-btn-final-primary:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 24px 60px -14px rgba(124, 58, 237, 0.7);
+}
+
+.pulse-btn-final-secondary {
+  border: 1px solid rgba(246, 196, 83, 0.5);
+  color: var(--pulse-gold);
+  background: rgba(246, 196, 83, 0.06);
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+
+.pulse-btn-final-secondary:hover {
+  background: rgba(246, 196, 83, 0.14);
+  transform: translateY(-3px);
+}
+
+.pulse-ticket-cta {
+  transition: transform 0.2s;
+}
+
+.pulse-ticket-cta:hover {
+  transform: translateY(-2px);
+}
+
+.pulse-footer-link {
+  transition: color 0.2s;
+}
+
+.pulse-footer-link:hover {
+  color: var(--pulse-green);
+}
+
+.pulse-social-link {
+  color: var(--pulse-dim);
+  transition: color 0.2s;
+}
+
+.pulse-social-link:hover {
+  color: var(--pulse-green);
+}
+
+/* ==================== hero ambient blobs ==================== */
+
+.pulse-hero-blob-green {
+  background: radial-gradient(circle, var(--pulse-green-dark) 0%, transparent 68%);
+  filter: blur(70px);
+  opacity: 0.32;
+}
+
+.pulse-hero-blob-violet {
+  background: radial-gradient(circle, var(--pulse-violet) 0%, transparent 66%);
+  filter: blur(80px);
+  opacity: 0.3;
+}
+
+/* ==================== digital ticket ==================== */
+
+.pulse-ticket-card {
+  transform: rotate(-4deg);
+  will-change: transform;
+  transition: transform 0.12s ease-out;
+}
+
+.pulse-ticket-border {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  box-shadow:
+    0 40px 90px -30px rgba(74, 222, 128, 0.45),
+    0 20px 60px -20px rgba(124, 58, 237, 0.4);
+}
+
+.pulse-ticket-inner {
+  background: linear-gradient(160deg, #101512 0%, #0b0b0d 60%, #0d0a14 100%);
+}
+
+.pulse-ticket-glow-green {
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.28), transparent 70%);
+  filter: blur(30px);
+}
+
+.pulse-ticket-glow-violet {
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.3), transparent 70%);
+  filter: blur(34px);
+}
+
+.pulse-ticket-vip-badge {
+  background: linear-gradient(135deg, #8a6116 0%, var(--pulse-gold) 45%, #fff0a8 100%);
+  color: #2a1e05;
+}
+
+/* ==================== experience section ==================== */
+
+.pulse-exp-decor-qr {
+  background: linear-gradient(135deg, var(--pulse-green-dark), var(--pulse-green));
+  color: #052e16;
+  box-shadow: 0 20px 50px -14px rgba(74, 222, 128, 0.6);
+}
+
+.pulse-exp-decor-star {
+  background: linear-gradient(135deg, #8a6116, var(--pulse-gold));
+  color: #2a1e05;
+  box-shadow: 0 18px 44px -12px rgba(246, 196, 83, 0.6);
+}
+
+.pulse-exp-decor-ticket {
+  background: linear-gradient(135deg, var(--pulse-violet), var(--pulse-violet-light));
+  color: #fff;
+  box-shadow: 0 18px 44px -12px rgba(124, 58, 237, 0.6);
+}
+
+.pulse-exp-decor-wine {
+  border: 2px solid rgba(74, 222, 128, 0.5);
+  color: var(--pulse-green);
+}
+
+.pulse-exp-glow-green {
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.22), transparent 70%);
+  filter: blur(20px);
+}
+
+.pulse-exp-glow-violet {
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.22), transparent 70%);
+  filter: blur(24px);
+}
+
+.pulse-exp-char {
+  display: inline-block;
+  opacity: 0.12;
+  transform: translateY(10px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s ease;
+}
+
+.pulse-exp-char-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ==================== marquee cards ==================== */
+
+.pulse-marquee-card-green {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.35), rgba(124, 58, 237, 0.2));
+}
+
+.pulse-marquee-card-green-inner {
+  background: linear-gradient(160deg, #121712, #0b0b0d);
+}
+
+.pulse-marquee-card-violet {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.35), rgba(246, 196, 83, 0.18));
+}
+
+.pulse-marquee-card-violet-inner {
+  background: linear-gradient(160deg, #141018, #0b0b0d);
+}
+
+/* ==================== ticket type cards ==================== */
+
+.pulse-plan-border-default {
+  border: 1px solid rgba(170, 181, 190, 0.14);
+}
+
+.pulse-plan-bg-default {
+  background: linear-gradient(160deg, #121712, #0b0b0d);
+}
+
+.pulse-plan-border-gold {
+  background: linear-gradient(135deg, #8a6116 0%, var(--pulse-gold) 45%, #fff0a8 100%);
+}
+
+.pulse-plan-bg-gold {
+  background: linear-gradient(160deg, #16130a, #0b0b0d);
+}
+
+.pulse-plan-border-violet {
+  border: 1px solid rgba(124, 58, 237, 0.3);
+}
+
+.pulse-plan-bg-violet {
+  background: linear-gradient(160deg, #141018, #0b0b0d);
+}
+
+.pulse-plan-cta-gold {
+  background: linear-gradient(135deg, #8a6116 0%, var(--pulse-gold) 45%, #fff0a8 100%);
+  color: #2a1e05;
+}
+
+.pulse-plan-cta-violet {
+  background: linear-gradient(135deg, var(--pulse-violet), var(--pulse-violet-light));
+  color: #0d0a14;
+}
+
+.pulse-plan-featured-badge {
+  background: linear-gradient(135deg, #8a6116 0%, var(--pulse-gold) 45%, #fff0a8 100%);
+  color: #2a1e05;
+}
+
+/* ==================== how it works / platform cards ==================== */
+
+.pulse-step-card {
+  background: linear-gradient(160deg, #121712, #0b0b0d);
+  border: 1px solid rgba(170, 181, 190, 0.1);
+}
+
+.pulse-feature-card {
+  background: linear-gradient(160deg, #131018, #0b0b0d);
+  border: 1px solid rgba(170, 181, 190, 0.1);
+}
+
+/* ==================== final cta ==================== */
+
+.pulse-final-border {
+  background: linear-gradient(135deg, var(--pulse-green-dark) 0%, var(--pulse-green) 45%, var(--pulse-violet) 100%);
+  box-shadow: 0 40px 100px -30px rgba(74, 222, 128, 0.4);
+}
+
+.pulse-final-inner {
+  background: radial-gradient(120% 140% at 20% 0%, #0f150f 0%, #0b0b0d 60%, #0d0a14 100%);
+}
+
+.pulse-final-glow {
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.28), transparent 70%);
+  filter: blur(50px);
+}
+
+/* ==================== platform section ==================== */
+
+.pulse-platform-glow {
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.14), transparent 68%);
+  filter: blur(60px);
+}

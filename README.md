@@ -1,55 +1,119 @@
 # App de Venta de Tickets Automatizada
 
-Aplicación web mobile-first para publicar eventos, vender entradas y controlar el acceso mediante códigos QR. Ver [`project.md`](./project.md) para la especificación completa.
+## Objetivo
 
-Este repositorio contiene dos aplicaciones independientes:
+Aplicación web mobile-first para publicar eventos, vender entradas (gratuitas y pagas) y controlar el acceso mediante códigos QR. Ver [`project.md`](./project.md) para la especificación completa del proyecto.
 
-- **`frontend/`** — React + Vite + TypeScript + Tailwind CSS.
-- **`backend/`** — Node.js + Express + TypeScript + Prisma + PostgreSQL.
+## Stack
 
-## Estado actual
+- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + React Router + TanStack Query + React Hook Form + Zod + `lucide-react`.
+- **Backend:** Node.js + Express 5 + TypeScript + Prisma + PostgreSQL + Zod.
+- **Base de datos:** PostgreSQL, corriendo en Docker en desarrollo.
+- **Testing:** Vitest + Testing Library (frontend), Vitest + Supertest (backend).
 
-Fase 1 completada: base técnica (estructura, Tailwind, Prisma, endpoint de salud). Todavía **no** hay autenticación, eventos, pagos, tickets ni control de acceso QR implementados.
+## Estructura general
+
+```text
+App Venta Tickets Automatizada/
+├── frontend/          React + Vite + TypeScript
+│   └── src/
+│       ├── api/                        cliente HTTP, llamadas al backend
+│       ├── config/                     IDs de datos demo (env)
+│       ├── features/events/landing/    landing "Pulse Event" y formulario de registro General
+│       ├── pages/                      páginas (PulseEventLanding)
+│       └── router/                     React Router (AppRouter)
+├── backend/           Node.js + Express + TypeScript + Prisma
+│   ├── prisma/
+│   │   ├── schema.prisma               modelo de datos
+│   │   ├── migrations/
+│   │   └── seed.ts                     seed de desarrollo (idempotente)
+│   └── src/
+│       ├── modules/registrations/      único módulo con lógica de negocio implementada
+│       ├── middlewares/errorHandler.ts
+│       ├── shared/                     prisma client, AppError, generación de token de QR
+│       └── config/env.ts
+├── docs/              documentación del proyecto (este directorio)
+├── project.md         especificación funcional completa
+└── README.md
+```
+
+Detalle de arquitectura, modelo de datos, decisiones de diseño y estado de avance en [`docs/`](./docs/).
 
 ## Requisitos
 
 - Node.js 20+
-- PostgreSQL 14+
+- Docker Desktop (para PostgreSQL en desarrollo) — ver [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md)
 
-## Puesta en marcha
+## Instalación
+
+```bash
+git clone <repo>
+cd "App Venta Tickets Automatizada"
+
+cd backend && npm install
+cd ../frontend && npm install
+```
+
+## Cómo levantar el proyecto
+
+Pasos completos (Docker, migraciones, seed, variables de entorno) en [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md). Resumen:
 
 ### Backend
 
 ```bash
 cd backend
-cp .env.example .env   # completar DATABASE_URL y demás variables
-npm install
+cp .env.example .env   # completar DATABASE_URL
 npx prisma generate
-npx prisma migrate dev --name init
-npm run dev             # http://localhost:4000
+npx prisma migrate deploy
+npm run db:seed         # datos demo (evento + 3 tipos de entrada), idempotente
+npm run dev              # http://localhost:4000
 ```
-
-Verificar que responde en `GET http://localhost:4000/api/health`.
 
 ### Frontend
 
 ```bash
 cd frontend
-cp .env.example .env   # completar VITE_API_URL y credenciales de Firebase
-npm install
+cp .env.example .env   # ver docs/LOCAL_SETUP.md para los valores correctos
 npm run dev              # http://localhost:5173
 ```
 
-## Estructura del repositorio
+## Comandos de lint, tests y build
 
-```text
-App Venta Tickets Automatizada/
-├── frontend/
-├── backend/
-├── skills/
-├── docs/
-├── project.md
-└── README.md
+Los mismos comandos existen en `backend/` y `frontend/`:
+
+```bash
+npm run lint
+npm test
+npm run build
 ```
 
-Detalle completo de la arquitectura, módulos, modelo de datos y fases del proyecto en [`project.md`](./project.md).
+El backend además tiene:
+
+```bash
+npx prisma validate           # valida backend/prisma/schema.prisma
+npm run test:db:setup          # aplica migraciones a la base de test aislada (tickets_test)
+```
+
+Los tests del backend corren contra una base de datos separada de la de desarrollo (ver [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md#base-separada-para-tests)), no contra `tickets_db`.
+
+## Estado actual
+
+Implementado y probado de punta a punta (backend + frontend + navegador real): la landing pública del evento demo y el flujo completo de **registro gratuito de entrada General**. Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+
+Todavía **no** hay autenticación, pagos, entradas VIP, generación real de QR, envío de email/WhatsApp, panel administrativo, escáner de acceso ni deploy.
+
+## Funcionalidades pendientes
+
+Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: QR real → email de confirmación → validación de QR → venta VIP + Mercado Pago → WhatsApp → CRM → administración y reportes → deploy.
+
+## Documentación
+
+| Documento | Contenido |
+|---|---|
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Arquitectura de frontend, backend, base de datos y flujo de registro General |
+| [`docs/API.md`](./docs/API.md) | Endpoints disponibles, request/response, errores |
+| [`docs/DATA_MODEL.md`](./docs/DATA_MODEL.md) | Modelos de Prisma y relaciones |
+| [`docs/DECISIONS.md`](./docs/DECISIONS.md) | Decisiones de diseño tomadas y su razón |
+| [`docs/PROGRESS.md`](./docs/PROGRESS.md) | Qué está hecho y qué falta |
+| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Orden sugerido de las próximas fases |
+| [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md) | Cómo levantar el entorno local paso a paso |

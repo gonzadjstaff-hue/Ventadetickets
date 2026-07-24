@@ -19,7 +19,7 @@ describe("TicketQrCode", () => {
   it("codifica exactamente pulse-ticket:v1:<token>, sin datos personales", async () => {
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
 
-    render(<TicketQrCode token="abc123" ticketPublicId="ticket-xyz" />);
+    render(<TicketQrCode token="abc123" />);
 
     await waitFor(() => expect(mockedToDataURL).toHaveBeenCalled());
 
@@ -30,32 +30,35 @@ describe("TicketQrCode", () => {
   it("renderiza la imagen del QR con alt accesible, sin mostrar el token como texto", async () => {
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
 
-    render(<TicketQrCode token="abc123" ticketPublicId="ticket-xyz" />);
+    render(<TicketQrCode token="abc123" />);
 
     const img = await screen.findByAltText(/código qr de tu entrada/i);
     expect(img).toBeInTheDocument();
-    expect(screen.queryByText("abc123")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("abc123");
   });
 
-  it("el botón de descarga usa pulse-event-<ticketPublicId>.png", async () => {
+  it("llama a onReady con el data URL cuando la generación es exitosa", async () => {
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
+    const onReady = vi.fn();
+    const onError = vi.fn();
 
-    render(<TicketQrCode token="abc123" ticketPublicId="ticket-xyz" />);
+    render(<TicketQrCode token="abc123" onReady={onReady} onError={onError} />);
 
-    const link = await screen.findByRole("link", { name: /descargar qr/i });
-    expect(link).toHaveAttribute("download", "pulse-event-ticket-xyz.png");
+    await waitFor(() => expect(onReady).toHaveBeenCalledWith("data:image/png;base64,FAKE"));
+    expect(onError).not.toHaveBeenCalled();
   });
 
-  it("si toDataURL falla, muestra un mensaje controlado sin romper ni exponer el token", async () => {
+  it("si toDataURL falla, muestra un mensaje controlado y llama a onError, sin exponer el token", async () => {
     mockedToDataURL.mockRejectedValue(new Error("boom, token=abc123"));
+    const onReady = vi.fn();
+    const onError = vi.fn();
 
-    render(<TicketQrCode token="abc123" ticketPublicId="ticket-xyz" />);
+    render(<TicketQrCode token="abc123" onReady={onReady} onError={onError} />);
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/no pudimos generar el código qr/i);
-    expect(screen.queryByAltText(/código qr/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /descargar qr/i })).not.toBeInTheDocument();
+    expect(onError).toHaveBeenCalled();
+    expect(onReady).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain("abc123");
     expect(document.body.textContent).not.toContain("boom");
   });

@@ -38,6 +38,17 @@ export const marqueeRow2: MarqueeCard[] = [
 export const experienceText =
   "Registrate, recibí tu entrada digital y preparate para una experiencia diseñada para conectar, celebrar y disfrutar desde el primer momento.";
 
+/**
+ * Datos del evento demo para mostrar en la entrada descargable. Mockeados
+ * (coinciden con los mismos valores ya usados en el ticket del hero) hasta
+ * que exista un endpoint real de detalle de evento.
+ */
+export const eventInfo = {
+  name: "Pulse Festival",
+  date: "14 · 15 · 16 NOV 2026",
+  venue: "Costanera Sur · Buenos Aires",
+};
+
 export type PlanVariant = "default" | "gold" | "violet";
 
 export interface TicketPlan {

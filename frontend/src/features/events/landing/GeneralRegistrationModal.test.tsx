@@ -11,12 +11,17 @@ vi.mock("../../../api/registrations", () => ({
   registerGeneralTicket: vi.fn(),
 }));
 
-const { mockedToDataURL } = vi.hoisted(() => ({
+const { mockedToDataURL, mockedToPng } = vi.hoisted(() => ({
   mockedToDataURL: vi.fn<(text: string, options?: Record<string, unknown>) => Promise<string>>(),
+  mockedToPng: vi.fn<(node: HTMLElement, options?: Record<string, unknown>) => Promise<string>>(),
 }));
 
 vi.mock("qrcode", () => ({
   toDataURL: mockedToDataURL,
+}));
+
+vi.mock("html-to-image", () => ({
+  toPng: mockedToPng,
 }));
 
 const mockedRegister = vi.mocked(registerGeneralTicket);
@@ -54,6 +59,8 @@ describe("GeneralRegistrationModal", () => {
     mockedRegister.mockReset();
     mockedToDataURL.mockReset();
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
+    mockedToPng.mockReset();
+    mockedToPng.mockResolvedValue("data:image/png;base64,TICKET_FAKE");
   });
 
   it("no renderiza nada si open es false", () => {
@@ -115,7 +122,7 @@ describe("GeneralRegistrationModal", () => {
     await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
 
     expect(await screen.findByRole("heading", { name: /quedó confirmada/i })).toBeInTheDocument();
-    expect(screen.getByText(/ada lovelace/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/ada lovelace/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(successResponse.ticketToken)).not.toBeInTheDocument();
   });
 
@@ -181,7 +188,7 @@ describe("GeneralRegistrationModal", () => {
     expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
   });
 
-  it("el botón de descarga del QR aparece con el nombre de archivo correcto", async () => {
+  it("muestra el botón 'Descargar entrada' tras un registro exitoso", async () => {
     const user = userEvent.setup();
     mockedRegister.mockResolvedValue(successResponse);
 
@@ -189,8 +196,7 @@ describe("GeneralRegistrationModal", () => {
     await fillValidForm(user);
     await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
 
-    const downloadLink = await screen.findByRole("link", { name: /descargar qr/i });
-    expect(downloadLink).toHaveAttribute("download", `pulse-event-${successResponse.ticketPublicId}.png`);
+    expect(await screen.findByRole("button", { name: /descargar entrada/i })).toBeInTheDocument();
   });
 
   it("al cerrar y reabrir el modal no queda el QR de la vez anterior", async () => {

@@ -7,11 +7,11 @@ import { useForm } from "react-hook-form";
 import { ApiError } from "../../../api/client";
 import { registerGeneralTicket, type GeneralRegistrationResponse } from "../../../api/registrations";
 import { demoEvent } from "../../../config/demoEvent";
+import EventTicket from "./EventTicket";
 import {
   generalRegistrationFormSchema,
   type GeneralRegistrationFormValues,
 } from "./generalRegistrationSchema";
-import TicketQrCode from "./TicketQrCode";
 
 const FORM_FIELDS = ["firstName", "lastName", "email", "phone", "acceptedTerms"] as const;
 
@@ -98,7 +98,12 @@ export default function GeneralRegistrationModal({ open, onClose }: GeneralRegis
               confirmada.
             </p>
 
-            <TicketQrCode token={result.ticketToken} ticketPublicId={result.ticketPublicId} />
+            <EventTicket
+              token={result.ticketToken}
+              attendeeName={result.attendeeName}
+              ticketType={result.ticketType}
+              ticketPublicId={result.ticketPublicId}
+            />
 
             <button
               type="button"

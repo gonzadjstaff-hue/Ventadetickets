@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 interface TicketQrCodeProps {
   /** Token crudo del ticket, recibido una sola vez en la respuesta de registro. Nunca se persiste ni se muestra como texto. */
   token: string;
-  ticketPublicId: string;
+  /** Se llama con el data URL del QR generado, para que el padre pueda habilitar acciones (ej. exportar la entrada completa). */
+  onReady?: (dataUrl: string) => void;
+  /** Se llama si falla la generación del QR. */
+  onError?: () => void;
 }
 
 const QR_COLOR = { dark: "#0C0C0C", light: "#E8EEF2" };
@@ -17,7 +20,12 @@ function buildQrContent(token: string): string {
   return `pulse-ticket:v1:${token}`;
 }
 
-export default function TicketQrCode({ token, ticketPublicId }: TicketQrCodeProps) {
+/**
+ * Genera y muestra el QR real del ticket. No tiene texto explicativo propio
+ * ni botón de descarga: es un bloque enfocado únicamente en QR — el resto de
+ * la presentación y la descarga viven en el componente que lo use (EventTicket).
+ */
+export default function TicketQrCode({ token, onReady, onError }: TicketQrCodeProps) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -26,16 +34,21 @@ export default function TicketQrCode({ token, ticketPublicId }: TicketQrCodeProp
 
     toDataURL(buildQrContent(token), { width: 220, margin: 1, color: QR_COLOR })
       .then((url) => {
-        if (!cancelled) setDataUrl(url);
+        if (cancelled) return;
+        setDataUrl(url);
+        onReady?.(url);
       })
       .catch(() => {
         // No se loguea el error: podría filtrar el texto codificado (que incluye el token).
-        if (!cancelled) setFailed(true);
+        if (cancelled) return;
+        setFailed(true);
+        onError?.();
       });
 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   if (failed) {
@@ -46,38 +59,19 @@ export default function TicketQrCode({ token, ticketPublicId }: TicketQrCodeProp
     );
   }
 
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <p className="text-center text-sm text-[#AAB5BE]">
-        Guardá este QR. Lo vas a necesitar para ingresar al evento.
-      </p>
+  if (!dataUrl) {
+    return (
+      <div
+        role="status"
+        aria-label="Generando código QR"
+        className="h-[180px] w-[180px] animate-pulse rounded-xl bg-[rgba(170,181,190,.1)]"
+      />
+    );
+  }
 
-      {dataUrl ? (
-        <>
-          <div className="rounded-xl bg-[#E8EEF2] p-3 shadow-[0_8px_22px_-8px_rgba(0,0,0,.6)]">
-            <img
-              src={dataUrl}
-              alt="Código QR de tu entrada"
-              width={200}
-              height={200}
-              className="block h-[200px] w-[200px]"
-            />
-          </div>
-          <a
-            href={dataUrl}
-            download={`pulse-event-${ticketPublicId}.png`}
-            className="pulse-btn-outline inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold uppercase tracking-[.06em] text-[#E8EEF2]"
-          >
-            Descargar QR
-          </a>
-        </>
-      ) : (
-        <div
-          role="status"
-          aria-label="Generando código QR"
-          className="h-[200px] w-[200px] animate-pulse rounded-xl bg-[rgba(170,181,190,.1)]"
-        />
-      )}
+  return (
+    <div className="rounded-xl bg-[#E8EEF2] p-3 shadow-[0_8px_22px_-8px_rgba(0,0,0,.6)]">
+      <img src={dataUrl} alt="Código QR de tu entrada" width={180} height={180} className="block h-[180px] w-[180px]" />
     </div>
   );
 }

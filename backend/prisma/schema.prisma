@@ -77,28 +77,30 @@ model User {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  orders     Order[]
-  checkIns   CheckIn[]
-  auditLogs  AuditLog[]
+  orders    Order[]
+  checkIns  CheckIn[]
+  auditLogs AuditLog[]
 }
 
 model Event {
-  id            String      @id @default(cuid())
-  publicId      String      @unique @default(cuid())
-  title         String
-  slug          String      @unique
-  description   String
-  coverImageUrl String?
-  venueName     String
-  address       String
-  startsAt      DateTime
-  endsAt        DateTime
-  salesStartAt  DateTime
-  salesEndAt    DateTime
-  capacity      Int
-  status        EventStatus @default(DRAFT)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id                 String      @id @default(cuid())
+  publicId           String      @unique @default(cuid())
+  title              String
+  slug               String      @unique
+  description        String
+  coverImageUrl      String?
+  venueName          String
+  address            String
+  startsAt           DateTime
+  endsAt             DateTime
+  salesStartAt       DateTime
+  salesEndAt         DateTime
+  capacity           Int
+  status             EventStatus @default(DRAFT)
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   ticketTypes TicketType[]
   orders      Order[]
@@ -106,22 +108,24 @@ model Event {
 }
 
 model TicketType {
-  id            String            @id @default(cuid())
-  eventId       String
-  name          String
-  description   String?
-  price         Decimal           @db.Decimal(10, 2)
-  currency      String            @default("ARS")
-  capacity      Int
-  maxPerOrder   Int
-  salesStartAt  DateTime
-  salesEndAt    DateTime
-  status        TicketTypeStatus  @default(ACTIVE)
-  sortOrder     Int               @default(0)
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id             String           @id @default(cuid())
+  eventId        String
+  name           String
+  description    String?
+  price          Decimal          @db.Decimal(10, 2)
+  currency       String           @default("ARS")
+  capacity       Int
+  maxPerOrder    Int
+  /// Cantidad de tickets individuales que se emiten por cada unidad comprada de este tipo (general y VIP individual = 1, VIP doble = 2). La emisión debe leer este valor, no inferirlo del nombre del tipo.
+  ticketsPerUnit Int              @default(1)
+  salesStartAt   DateTime
+  salesEndAt     DateTime
+  status         TicketTypeStatus @default(ACTIVE)
+  sortOrder      Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  event      Event       @relation(fields: [eventId], references: [id])
+  event      Event       @relation(fields: [eventId], references: [id], onDelete: Restrict)
   orderItems OrderItem[]
   tickets    Ticket[]
 
@@ -141,14 +145,19 @@ model Order {
   externalReference  String?
   expiresAt          DateTime?
   paidAt             DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  refundedAt         DateTime?
+  refundReason       String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  user     User        @relation(fields: [userId], references: [id])
-  event    Event       @relation(fields: [eventId], references: [id])
-  items    OrderItem[]
-  payments Payment[]
-  tickets  Ticket[]
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  event         Event                 @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  payments      Payment[]
+  tickets       Ticket[]
+  webhookEvents PaymentWebhookEvent[]
 
   @@index([userId])
   @@index([eventId])
@@ -162,67 +171,81 @@ model OrderItem {
   unitPrice    Decimal @db.Decimal(10, 2)
   subtotal     Decimal @db.Decimal(10, 2)
 
-  order      Order      @relation(fields: [orderId], references: [id])
-  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+  tickets    Ticket[]
 
   @@index([orderId])
   @@index([ticketTypeId])
 }
 
 model Payment {
-  id                String        @id @default(cuid())
-  orderId           String
-  provider          String
-  providerPaymentId String?
-  status            PaymentStatus @default(PENDING)
-  amount            Decimal       @db.Decimal(10, 2)
-  currency          String        @default("ARS")
-  paymentMethod     String?
-  rawStatus         String?
-  approvedAt        DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  id                 String        @id @default(cuid())
+  orderId            String
+  provider           String
+  providerPaymentId  String?
+  status             PaymentStatus @default(PENDING)
+  amount             Decimal       @db.Decimal(10, 2)
+  currency           String        @default("ARS")
+  paymentMethod      String?
+  rawStatus          String?
+  approvedAt         DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  refundedAt         DateTime?
+  refundReason       String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  order Order @relation(fields: [orderId], references: [id])
+  order         Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  webhookEvents PaymentWebhookEvent[]
 
+  @@unique([provider, providerPaymentId])
   @@index([orderId])
 }
 
 model Ticket {
-  id           String       @id @default(cuid())
-  publicId     String       @unique @default(cuid())
-  orderId      String
-  ticketTypeId String
-  holderName   String
-  holderEmail  String
-  qrTokenHash  String       @unique
-  status       TicketStatus @default(ACTIVE)
-  issuedAt     DateTime     @default(now())
-  usedAt       DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  publicId           String       @unique @default(cuid())
+  orderId            String
+  orderItemId        String
+  ticketTypeId       String
+  holderName         String
+  holderEmail        String
+  qrTokenHash        String       @unique
+  status             TicketStatus @default(ACTIVE)
+  issuedAt           DateTime     @default(now())
+  usedAt             DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  refundedAt         DateTime?
+  refundReason       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
-  order      Order       @relation(fields: [orderId], references: [id])
-  ticketType TicketType  @relation(fields: [ticketTypeId], references: [id])
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem  OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
   checkIns   CheckIn[]
 
   @@index([orderId])
+  @@index([orderItemId])
   @@index([ticketTypeId])
 }
 
 model CheckIn {
-  id             String        @id @default(cuid())
-  ticketId       String
-  eventId        String
+  id              String        @id @default(cuid())
+  ticketId        String
+  eventId         String
   validatorUserId String
-  result         CheckInResult
-  checkedAt      DateTime      @default(now())
-  deviceInfo     String?
-  ipAddress      String?
+  result          CheckInResult
+  checkedAt       DateTime      @default(now())
+  deviceInfo      String?
+  ipAddress       String?
 
-  ticket    Ticket @relation(fields: [ticketId], references: [id])
-  event     Event  @relation(fields: [eventId], references: [id])
-  validator User   @relation(fields: [validatorUserId], references: [id])
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  event     Event  @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  validator User   @relation(fields: [validatorUserId], references: [id], onDelete: Restrict)
 
   @@index([ticketId])
   @@index([eventId])
@@ -230,16 +253,23 @@ model CheckIn {
 }
 
 model PaymentWebhookEvent {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   provider        String
   externalEventId String
   eventType       String
   payload         Json
-  processed       Boolean  @default(false)
+  processed       Boolean   @default(false)
   processedAt     DateTime?
-  createdAt       DateTime @default(now())
+  paymentId       String?
+  orderId         String?
+  createdAt       DateTime  @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@unique([provider, externalEventId])
+  @@index([paymentId])
+  @@index([orderId])
 }
 
 model AuditLog {
@@ -251,7 +281,7 @@ model AuditLog {
   metadata   Json?
   createdAt  DateTime @default(now())
 
-  user User? @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([entityType, entityId])

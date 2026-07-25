@@ -19,8 +19,10 @@ App Venta Tickets Automatizada/
 │   └── src/
 │       ├── api/                        cliente HTTP, llamadas al backend
 │       ├── config/                     IDs de datos demo (env)
-│       ├── features/events/landing/    landing "Pulse Event" y formulario de registro General
-│       ├── pages/                      páginas (PulseEventLanding)
+│       ├── features/events/landing/    landing "Pulse Event", registro General, entrada descargable
+│       ├── features/events/checkout/   checkout VIP (comprador, asistentes, resumen, pago simulado)
+│       ├── features/scanner/           lector de QR y pantalla de check-in
+│       ├── pages/                      páginas (PulseEventLanding, CheckInPage)
 │       └── router/                     React Router (AppRouter)
 ├── backend/           Node.js + Express + TypeScript + Prisma
 │   ├── prisma/
@@ -28,9 +30,13 @@ App Venta Tickets Automatizada/
 │   │   ├── migrations/
 │   │   └── seed.ts                     seed de desarrollo (idempotente)
 │   └── src/
-│       ├── modules/registrations/      único módulo con lógica de negocio implementada
+│       ├── modules/registrations/      registro General (gratuita)
+│       ├── modules/check-in/           validación de QR (MVP sin autenticación)
+│       ├── modules/orders/             creación y consulta de orden VIP, reserva de capacidad
+│       ├── modules/payments/           simulador de pago (solo dev/tests) y emisión de tickets
+│       ├── integrations/email/         envío del ticket por email (Resend o consola de desarrollo)
 │       ├── middlewares/errorHandler.ts
-│       ├── shared/                     prisma client, AppError, generación de token de QR
+│       ├── shared/                     prisma client, AppError, generación/parseo de token de QR
 │       └── config/env.ts
 ├── docs/              documentación del proyecto (este directorio)
 ├── project.md         especificación funcional completa
@@ -98,13 +104,15 @@ Los tests del backend corren contra una base de datos separada de la de desarrol
 
 ## Estado actual
 
-Implementado y probado de punta a punta (backend + frontend + navegador real): la landing pública del evento demo y el flujo completo de **registro gratuito de entrada General**. Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+Implementado: la landing pública del evento demo, el **registro gratuito de entrada General**, **QR real** con entrada descargable, **envío por email** (General y VIP), **validación de acceso por QR** (check-in, MVP sin autenticación) y la **venta de entradas VIP Individual y VIP Doble con pago simulado** (sin Mercado Pago real todavía). Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
-Todavía **no** hay autenticación, pagos, entradas VIP, generación real de QR, envío de email/WhatsApp, panel administrativo, escáner de acceso ni deploy.
+El registro General y el check-in están probados de punta a punta contra navegador real; la venta VIP está probada con la suite automatizada (94 tests backend + 70 tests frontend) y tuvo una primera prueba manual parcial (VIP Individual aprobada, hasta la emisión del ticket) — VIP Doble, rechazo, cancelación y el resto de VIP Individual (descarga y check-in) todavía no se probaron a mano.
+
+Todavía **no** hay autenticación, Mercado Pago real, WhatsApp, CRM, panel administrativo, reportes ni deploy.
 
 ## Funcionalidades pendientes
 
-Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: QR real → email de confirmación → validación de QR → venta VIP + Mercado Pago → WhatsApp → CRM → administración y reportes → deploy.
+Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: Mercado Pago real → cron de expiración de órdenes → WhatsApp → CRM → administración y reportes → deploy.
 
 ## Documentación
 

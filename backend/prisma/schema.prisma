@@ -164,12 +164,14 @@ model Order {
 }
 
 model OrderItem {
-  id           String  @id @default(cuid())
-  orderId      String
-  ticketTypeId String
-  quantity     Int
-  unitPrice    Decimal @db.Decimal(10, 2)
-  subtotal     Decimal @db.Decimal(10, 2)
+  id            String  @id @default(cuid())
+  orderId       String
+  ticketTypeId  String
+  quantity      Int
+  unitPrice     Decimal @db.Decimal(10, 2)
+  subtotal      Decimal @db.Decimal(10, 2)
+  /// Nombres de los asistentes (array de strings), en el mismo orden en que se emiten los Ticket cuando el pago queda aprobado. Opcional: el registro General no lo usa (el propio holderName del ticket alcanza). Ver docs/DECISIONS.md.
+  attendeeNames Json?
 
   order      Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
   ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)

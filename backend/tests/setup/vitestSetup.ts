@@ -11,3 +11,6 @@ process.env.DATABASE_URL = resolveTestDatabaseUrl();
 // antes de importar la app, en su propio archivo (cada archivo de test corre
 // en su registro de módulos aislado, así que no se pisan entre sí).
 process.env.ENABLE_MVP_CHECKIN = "true";
+
+// Mismo criterio para el simulador de pago VIP.
+process.env.ENABLE_MVP_PAYMENT_SIMULATOR = "true";

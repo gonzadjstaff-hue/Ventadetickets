@@ -7,4 +7,6 @@
 export const demoEvent = {
   eventPublicId: (import.meta.env.VITE_DEMO_EVENT_PUBLIC_ID as string | undefined) ?? "",
   generalTicketTypeId: (import.meta.env.VITE_DEMO_GENERAL_TICKET_TYPE_ID as string | undefined) ?? "",
+  vipIndividualTicketTypeId: (import.meta.env.VITE_DEMO_VIP_INDIVIDUAL_TICKET_TYPE_ID as string | undefined) ?? "",
+  vipDobleTicketTypeId: (import.meta.env.VITE_DEMO_VIP_DOBLE_TICKET_TYPE_ID as string | undefined) ?? "",
 };

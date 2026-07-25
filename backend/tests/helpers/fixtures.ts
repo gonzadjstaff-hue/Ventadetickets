@@ -108,6 +108,29 @@ export async function createFixtureOrder(
 }
 
 /**
+ * Crea un OrderItem suelto (sin Ticket), para tests de capacidad que
+ * necesitan simular órdenes VIP en distintos estados sin pasar por el
+ * endpoint HTTP de creación (más rápido, y evita la transacción Serializable
+ * de ese endpoint para estos casos donde no hace falta ejercitarla).
+ */
+export async function createFixtureOrderItem(
+  orderId: string,
+  ticketTypeId: string,
+  overrides: Partial<Prisma.OrderItemUncheckedCreateInput> = {},
+) {
+  return prisma.orderItem.create({
+    data: {
+      orderId,
+      ticketTypeId,
+      quantity: 1,
+      unitPrice: 0,
+      subtotal: 0,
+      ...overrides,
+    },
+  });
+}
+
+/**
  * Crea un OrderItem + Ticket directamente (sin pasar por el flujo HTTP de
  * registro), para poder construir tickets en cualquier estado que necesiten
  * los tests de check-in. Devuelve también el token crudo (nunca persistido)

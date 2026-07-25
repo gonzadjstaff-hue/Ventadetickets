@@ -46,6 +46,23 @@ const envSchema = z.object({
    * guardarse por Event (ej. Event.timezone), no como variable global única.
    */
   EVENT_TIMEZONE: z.preprocess(emptyToUndefined, z.string().default("America/Argentina/Buenos_Aires")),
+  /**
+   * Minutos que una Order VIP reserva capacidad en estado PENDING antes de
+   * expirar. Ya estaba documentada en .env.example sin usarse; ahora la lee
+   * modules/orders/. Reutilizada tal cual en vez de crear otra variable.
+   */
+  ORDER_EXPIRATION_MINUTES: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(15)),
+  /**
+   * MVP temporal: habilita POST /api/dev/orders/:orderPublicId/simulate-payment,
+   * que aprueba/rechaza/cancela pagos de mentira y (si aprueba) emite tickets
+   * reales. Debe existir solo en desarrollo/tests — nunca en producción, no
+   * hay ningún proveedor de pago real detrás. Deshabilitado por defecto:
+   * solo el string exacto "true" lo activa. Ver modules/payments/.
+   */
+  ENABLE_MVP_PAYMENT_SIMULATOR: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;

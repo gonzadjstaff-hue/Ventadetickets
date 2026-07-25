@@ -1,10 +1,18 @@
 import { Check } from "lucide-react";
 import { useState } from "react";
 
+import { demoEvent } from "../../../config/demoEvent";
+import VipCheckoutModal from "../checkout/VipCheckoutModal";
 import GeneralRegistrationModal from "./GeneralRegistrationModal";
 import { iconMap } from "./icons";
 import { ticketTypes, type PlanVariant, type TicketPlan } from "./mockData";
 import { useRevealRef } from "./useRevealRef";
+
+/** Mapea el id mockeado de la card (mockData.ts) a los datos reales que necesita el checkout VIP. */
+const VIP_CHECKOUT_CONFIG: Record<string, { ticketTypeId: string; ticketsPerUnit: 1 | 2 }> = {
+  "vip-individual": { ticketTypeId: demoEvent.vipIndividualTicketTypeId, ticketsPerUnit: 1 },
+  "vip-doble": { ticketTypeId: demoEvent.vipDobleTicketTypeId, ticketsPerUnit: 2 },
+};
 
 const variantClasses: Record<
   PlanVariant,
@@ -39,16 +47,16 @@ const variantClasses: Record<
 function TicketPlanCard({
   plan,
   index,
-  onSelectGeneral,
+  onSelect,
 }: {
   plan: TicketPlan;
   index: number;
-  onSelectGeneral: () => void;
+  onSelect: () => void;
 }) {
   const ref = useRevealRef<HTMLDivElement>((index % 3) * 0.08);
   const styles = variantClasses[plan.variant];
   const Icon = iconMap[plan.icon];
-  const isGeneral = plan.id === "general";
+  const isBuyable = plan.id === "general" || plan.id === "vip-individual" || plan.id === "vip-doble";
 
   return (
     <div
@@ -80,10 +88,10 @@ function TicketPlanCard({
             </li>
           ))}
         </ul>
-        {isGeneral ? (
+        {isBuyable ? (
           <button
             type="button"
-            onClick={onSelectGeneral}
+            onClick={onSelect}
             className={`pulse-ticket-cta mt-auto rounded-full py-[15px] text-center text-[.95rem] font-extrabold uppercase tracking-[.06em] ${styles.cta}`}
           >
             {plan.ctaLabel}
@@ -101,16 +109,39 @@ function TicketPlanCard({
   );
 }
 
+type VipPlanId = "vip-individual" | "vip-doble";
+
 export default function TicketTypes() {
   const [isGeneralModalOpen, setGeneralModalOpen] = useState(false);
   // Cambia en cada apertura para forzar un remount del modal (formulario y
   // resultado limpios), en vez de resetear estado manualmente en un efecto.
   const [generalModalInstance, setGeneralModalInstance] = useState(0);
 
+  const [isVipModalOpen, setVipModalOpen] = useState(false);
+  const [vipModalInstance, setVipModalInstance] = useState(0);
+  const [vipPlanId, setVipPlanId] = useState<VipPlanId>("vip-individual");
+
   const openGeneralModal = () => {
     setGeneralModalInstance((instance) => instance + 1);
     setGeneralModalOpen(true);
   };
+
+  const openVipModal = (planId: VipPlanId) => {
+    setVipPlanId(planId);
+    setVipModalInstance((instance) => instance + 1);
+    setVipModalOpen(true);
+  };
+
+  const handleSelect = (planId: string) => {
+    if (planId === "general") {
+      openGeneralModal();
+    } else if (planId === "vip-individual" || planId === "vip-doble") {
+      openVipModal(planId);
+    }
+  };
+
+  const vipPlan = ticketTypes.find((plan) => plan.id === vipPlanId)!;
+  const vipConfig = VIP_CHECKOUT_CONFIG[vipPlanId];
 
   return (
     <section id="tickets" className="relative bg-[#0C0C0C] px-6 py-[clamp(60px,10vh,130px)]">
@@ -125,15 +156,25 @@ export default function TicketTypes() {
         </h2>
         <div className="mt-[clamp(40px,6vh,72px)] grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-stretch gap-6">
           {ticketTypes.map((plan, i) => (
-            <TicketPlanCard key={plan.id} plan={plan} index={i} onSelectGeneral={openGeneralModal} />
+            <TicketPlanCard key={plan.id} plan={plan} index={i} onSelect={() => handleSelect(plan.id)} />
           ))}
         </div>
       </div>
 
       <GeneralRegistrationModal
-        key={generalModalInstance}
+        key={`general-${generalModalInstance}`}
         open={isGeneralModalOpen}
         onClose={() => setGeneralModalOpen(false)}
+      />
+
+      <VipCheckoutModal
+        key={`vip-${vipModalInstance}`}
+        open={isVipModalOpen}
+        onClose={() => setVipModalOpen(false)}
+        ticketTypeId={vipConfig.ticketTypeId}
+        ticketTypeName={vipPlan.name}
+        ticketsPerUnit={vipConfig.ticketsPerUnit}
+        priceLabel={vipPlan.price}
       />
     </section>
   );

@@ -104,6 +104,26 @@ describe("VipCheckoutModal", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("bloquea el scroll del fondo mientras está abierto y lo restaura al cerrarse", () => {
+    document.body.style.overflow = "";
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <VipCheckoutModal open onClose={vi.fn()} ticketTypeId="x" ticketTypeName="VIP Individual" ticketsPerUnit={1} priceLabel="$35.000" />
+      </QueryClientProvider>,
+    );
+
+    expect(document.body.style.overflow).toBe("hidden");
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <VipCheckoutModal open={false} onClose={vi.fn()} ticketTypeId="x" ticketTypeName="VIP Individual" ticketsPerUnit={1} priceLabel="$35.000" />
+      </QueryClientProvider>,
+    );
+
+    expect(document.body.style.overflow).toBe("");
+  });
+
   it("VIP Individual pide exactamente un campo de asistente", async () => {
     renderModal({ ticketsPerUnit: 1 });
     const user = userEvent.setup();

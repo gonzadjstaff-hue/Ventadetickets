@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
 import { registerGeneralTicket, type GeneralRegistrationResponse } from "../../../api/registrations";
@@ -11,9 +11,12 @@ vi.mock("../../../api/registrations", () => ({
   registerGeneralTicket: vi.fn(),
 }));
 
-const { mockedToDataURL, mockedToPng } = vi.hoisted(() => ({
+const { mockedToDataURL, mockedToPng, mockAddImage, mockAddPage, mockOutput } = vi.hoisted(() => ({
   mockedToDataURL: vi.fn<(text: string, options?: Record<string, unknown>) => Promise<string>>(),
   mockedToPng: vi.fn<(node: HTMLElement, options?: Record<string, unknown>) => Promise<string>>(),
+  mockAddImage: vi.fn(),
+  mockAddPage: vi.fn(),
+  mockOutput: vi.fn(),
 }));
 
 vi.mock("qrcode", () => ({
@@ -22,6 +25,14 @@ vi.mock("qrcode", () => ({
 
 vi.mock("html-to-image", () => ({
   toPng: mockedToPng,
+}));
+
+vi.mock("jspdf", () => ({
+  jsPDF: class MockJsPDF {
+    addImage = mockAddImage;
+    addPage = mockAddPage;
+    output = mockOutput;
+  },
 }));
 
 const mockedRegister = vi.mocked(registerGeneralTicket);
@@ -63,6 +74,10 @@ describe("GeneralRegistrationModal", () => {
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
     mockedToPng.mockReset();
     mockedToPng.mockResolvedValue("data:image/png;base64,TICKET_FAKE");
+    mockAddImage.mockReset();
+    mockAddPage.mockReset();
+    mockOutput.mockReset();
+    mockOutput.mockReturnValue(new Blob(["pdf-fake"], { type: "application/pdf" }));
   });
 
   it("no renderiza nada si open es false", () => {
@@ -304,5 +319,69 @@ describe("GeneralRegistrationModal", () => {
     expect(screen.queryByText(/no pudimos enviar el email/i)).not.toBeInTheDocument();
     expect(await screen.findByAltText(/código qr de tu entrada/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /descargar entrada/i })).toBeInTheDocument();
+  });
+
+  describe("descarga en PDF", () => {
+    let clickSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      clickSpy.mockRestore();
+    });
+
+    it("genera un único PDF de una sola página, con el ticketPublicId en el nombre de archivo, sin código de ZIP", async () => {
+      const user = userEvent.setup();
+      mockedRegister.mockResolvedValue(successResponse);
+
+      renderModal();
+      await fillValidForm(user);
+      await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+      await user.click(await screen.findByRole("button", { name: /^descargar entrada$/i }));
+
+      await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+      expect(mockAddPage).not.toHaveBeenCalled();
+      expect(mockAddImage).toHaveBeenCalledTimes(1);
+
+      const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement;
+      expect(anchor.download).toBe(`pulse-event-general-${successResponse.ticketPublicId}.pdf`);
+      expect(anchor.download).not.toContain(".zip");
+      expect(anchor.download).not.toContain(".png");
+    });
+
+    it("usa el QR generado para este ticket (no uno distinto)", async () => {
+      const user = userEvent.setup();
+      mockedRegister.mockResolvedValue(successResponse);
+
+      renderModal();
+      await fillValidForm(user);
+      await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+      await screen.findByAltText(/código qr de tu entrada/i);
+
+      expect(mockedToDataURL).toHaveBeenCalledWith(
+        `pulse-ticket:v1:${successResponse.ticketToken}`,
+        expect.anything(),
+      );
+    });
+
+    it("sin soporte de Web Share API, la descarga sigue disponible y no aparece 'Compartir entrada'", async () => {
+      const originalShare = (navigator as unknown as { share?: unknown }).share;
+      delete (navigator as unknown as { share?: unknown }).share;
+
+      const user = userEvent.setup();
+      mockedRegister.mockResolvedValue(successResponse);
+
+      renderModal();
+      await fillValidForm(user);
+      await user.click(screen.getByRole("button", { name: /confirmar entrada gratuita/i }));
+      await screen.findByAltText(/código qr de tu entrada/i);
+
+      expect(screen.queryByRole("button", { name: /^compartir entrada$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^descargar entrada$/i })).toBeEnabled();
+
+      if (originalShare) (navigator as unknown as { share: unknown }).share = originalShare;
+    });
   });
 });

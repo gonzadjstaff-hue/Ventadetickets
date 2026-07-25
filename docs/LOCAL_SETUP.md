@@ -101,7 +101,7 @@ Requiere `ENABLE_MVP_PAYMENT_SIMULATOR=true` en `backend/.env` (paso 2) y reinic
 3. Completar 1 asistente (Individual) o 2 asistentes (Doble) → siguiente.
 4. Revisar el resumen (tipo, accesos, total) → "Confirmar reserva". La orden queda `PENDING`, con el tiempo restante de la reserva a la vista.
 5. Con `ENABLE_MVP_PAYMENT_SIMULATOR=true` y el frontend en desarrollo (`npm run dev`, no un build de producción), aparece el bloque "Simulador de pago (solo desarrollo)" con 4 botones:
-   - **Aprobar pago** → la orden pasa a `PAID`, se emite 1 ticket (Individual) o 2 tickets (Doble), cada uno con su propio QR y botón de descarga individual.
+   - **Aprobar pago** → la orden pasa a `PAID`, se emite 1 ticket (Individual) o 2 tickets (Doble). VIP Individual muestra "Descargar entrada" (PDF de 1 página); VIP Doble muestra las dos entradas visibles pero con un único botón "Descargar ambas entradas" (PDF de 2 páginas, una por asistente, ver `docs/DECISIONS.md`), para evitar que el comprador descargue solo una y crea que ya tiene las dos. Si el navegador soporta la Web Share API con archivos, aparece además "Compartir entrada"/"Compartir ambas entradas".
    - **Dejar pendiente** → la orden sigue `PENDING`.
    - **Rechazar** → la orden sigue `PENDING` (para poder reintentar), con un aviso de pago rechazado.
    - **Cancelar** → la orden pasa a `CANCELLED`, libera el cupo.

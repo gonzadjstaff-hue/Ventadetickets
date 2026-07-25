@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 
 import {
@@ -16,7 +16,11 @@ import {
 } from "../../../api/orders";
 import { ApiError } from "../../../api/client";
 import { demoEvent } from "../../../config/demoEvent";
-import EventTicket from "../landing/EventTicket";
+import EventTicket, { type EventTicketHandle } from "../landing/EventTicket";
+import TicketDeliveryButtons from "../ticketExport/TicketDeliveryButtons";
+import { supportsFileShare } from "../ticketExport/share";
+import { sanitizeFileNameId } from "../ticketExport/ticketPdf";
+import { useTicketPdfDelivery } from "../ticketExport/useTicketPdfDelivery";
 import SimulatePaymentControls from "./SimulatePaymentControls";
 import { buildVipCheckoutSchema, type VipCheckoutFormValues } from "./vipCheckoutSchema";
 
@@ -32,6 +36,14 @@ interface VipCheckoutModalProps {
 }
 
 const ATTENDEE_LABELS = ["Primer asistente", "Segundo asistente"];
+const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4ADE80]";
+
+/** Mensaje uniforme para las 3 mutaciones del checkout: un error controlado del backend (`ApiError`) se muestra tal cual; cualquier otra falla (red caída, timeout) usa un mensaje genérico sin detalle técnico. */
+function getErrorMessage(isError: boolean, error: unknown): string | null {
+  if (!isError) return null;
+  if (error instanceof ApiError) return error.message;
+  return "No pudimos conectar con el servidor. Probá de nuevo en un momento.";
+}
 
 export default function VipCheckoutModal({
   open,
@@ -49,13 +61,31 @@ export default function VipCheckoutModal({
   // crudo no se puede volver a pedir después (ver docs/DECISIONS.md), así
   // que ninguna consulta/simulación posterior debe pisar este estado.
   const [approvedTickets, setApprovedTickets] = useState<SimulatedTicket[] | null>(null);
+  // Bloque 7 (prevención de pérdida accidental): true recién cuando el
+  // usuario efectivamente descargó su(s) entrada(s) — individual o el ZIP
+  // conjunto. Nunca implica persistir el token en ningún lado, solo un flag
+  // en memoria de este componente.
+  const [ticketsDownloaded, setTicketsDownloaded] = useState(false);
+  const [pendingCloseConfirm, setPendingCloseConfirm] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!order || liveStatus !== "PENDING") return;
+    if (!open || !order || liveStatus !== "PENDING") return;
     const interval = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(interval);
-  }, [order, liveStatus]);
+  }, [open, order, liveStatus]);
+
+  // El fondo (landing) no debe poder scrollearse mientras el modal está
+  // abierto. Se restaura el valor previo, no un "" a secas, por si algún
+  // ancestro ya tenía un overflow explícito distinto del default.
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   const {
     register,
@@ -89,7 +119,10 @@ export default function VipCheckoutModal({
     onSuccess: (data) => {
       setLiveStatus(data.orderStatus);
       setPaymentStatus(data.paymentStatus);
-      if (data.tickets) setApprovedTickets(data.tickets);
+      if (data.tickets) {
+        setApprovedTickets(data.tickets);
+        setTicketsDownloaded(false);
+      }
     },
   });
 
@@ -105,7 +138,13 @@ export default function VipCheckoutModal({
 
   if (!open) return null;
 
+  const hasUndownloadedTickets = liveStatus === "PAID" && !!approvedTickets && !ticketsDownloaded;
+
   const handleClose = () => {
+    if (hasUndownloadedTickets && !pendingCloseConfirm) {
+      setPendingCloseConfirm(true);
+      return;
+    }
     onClose();
   };
 
@@ -128,19 +167,23 @@ export default function VipCheckoutModal({
     setLiveStatus("PENDING");
     setPaymentStatus(null);
     setApprovedTickets(null);
+    setTicketsDownloaded(false);
+    setPendingCloseConfirm(false);
     setStep("buyer");
   };
 
-  const createError =
-    createMutation.error instanceof ApiError
-      ? createMutation.error.message
-      : createMutation.isError
-        ? "No pudimos conectar con el servidor. Probá de nuevo en un momento."
-        : null;
+  const createError = getErrorMessage(createMutation.isError, createMutation.error);
+  const simulateError = getErrorMessage(simulateMutation.isError, simulateMutation.error);
+  const refreshError = getErrorMessage(refreshMutation.isError, refreshMutation.error);
 
   const minutesLeft = order?.expiresAt
     ? Math.max(0, Math.ceil((new Date(order.expiresAt).getTime() - now) / 60000))
     : null;
+  // La reserva ya venció según el reloj local, pero el backend todavía no lo
+  // confirmó (expiración perezosa, ver docs/DECISIONS.md): se refleja acá
+  // para no dejar aprobar visualmente algo que el backend va a rechazar de
+  // todos modos, sin necesidad de disparar un refresh automático.
+  const isLocallyExpired = minutesLeft !== null && minutesLeft <= 0;
 
   return (
     <div
@@ -153,125 +196,172 @@ export default function VipCheckoutModal({
         <button
           type="button"
           onClick={handleClose}
-          aria-label="Cerrar"
-          className="absolute right-4 top-4 text-[#AAB5BE] transition-colors hover:text-[#E8EEF2]"
+          aria-label="Cerrar modal"
+          className={`absolute right-4 top-4 rounded-full text-[#AAB5BE] transition-colors hover:text-[#E8EEF2] ${FOCUS_RING}`}
         >
           <X size={20} />
         </button>
 
-        {!order && (
-          <form onSubmit={(e) => e.preventDefault()} noValidate className="flex flex-col gap-4">
-            <div>
-              <h2 id="vip-checkout-title" className="text-xl font-bold text-[#E8EEF2]">
-                {ticketTypeName}
-              </h2>
-              <p className="mt-1 text-sm text-[#AAB5BE]">
-                {priceLabel} · {ticketsPerUnit} {ticketsPerUnit === 1 ? "acceso" : "accesos"}
-              </p>
-            </div>
-
-            {step === "buyer" && (
-              <>
-                <p className="text-xs font-semibold uppercase tracking-[.12em] text-[#4ADE80]">Paso 1 de 3 · Datos del comprador</p>
-                <Field label="Nombre" htmlFor="buyer-name" error={errors.buyer?.name?.message}>
-                  <input id="buyer-name" type="text" className={inputClass(!!errors.buyer?.name)} {...register("buyer.name")} />
-                </Field>
-                <Field label="Email" htmlFor="buyer-email" error={errors.buyer?.email?.message}>
-                  <input id="buyer-email" type="email" className={inputClass(!!errors.buyer?.email)} {...register("buyer.email")} />
-                </Field>
-                <Field label="WhatsApp" htmlFor="buyer-whatsapp" error={errors.buyer?.whatsapp?.message}>
-                  <input
-                    id="buyer-whatsapp"
-                    type="tel"
-                    placeholder="+5491122334455"
-                    className={inputClass(!!errors.buyer?.whatsapp)}
-                    {...register("buyer.whatsapp")}
-                  />
-                </Field>
-                <button type="button" onClick={goToAttendees} className="pulse-btn-primary mt-2 rounded-full py-3.5 text-sm font-bold uppercase tracking-[.06em]">
-                  Siguiente
-                </button>
-              </>
-            )}
-
-            {step === "attendees" && (
-              <>
-                <p className="text-xs font-semibold uppercase tracking-[.12em] text-[#4ADE80]">Paso 2 de 3 · Asistentes</p>
-                {Array.from({ length: ticketsPerUnit }, (_, i) => (
-                  <Field
-                    key={i}
-                    label={ticketsPerUnit === 1 ? "Nombre del asistente" : ATTENDEE_LABELS[i]}
-                    htmlFor={`attendee-${i}`}
-                    error={errors.attendees?.[i]?.name?.message}
-                  >
-                    <input
-                      id={`attendee-${i}`}
-                      type="text"
-                      className={inputClass(!!errors.attendees?.[i]?.name)}
-                      {...register(`attendees.${i}.name` as const)}
-                    />
-                  </Field>
-                ))}
-                <div className="mt-2 flex gap-3">
-                  <button type="button" onClick={() => setStep("buyer")} className="flex-1 rounded-full border border-[rgba(170,181,190,.3)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#AAB5BE]">
-                    Atrás
-                  </button>
-                  <button type="button" onClick={goToSummary} className="pulse-btn-primary flex-1 rounded-full py-3 text-sm font-bold uppercase tracking-[.06em]">
-                    Siguiente
-                  </button>
+        {pendingCloseConfirm ? (
+          <CloseConfirmView isMultiple={ticketsPerUnit > 1} onCancel={() => setPendingCloseConfirm(false)} onConfirm={onClose} />
+        ) : (
+          <>
+            {!order && (
+              <form onSubmit={(e) => e.preventDefault()} noValidate className="flex flex-col gap-4">
+                <div>
+                  <h2 id="vip-checkout-title" className="text-xl font-bold text-[#E8EEF2]">
+                    {ticketTypeName}
+                  </h2>
+                  <p className="mt-1 text-sm text-[#AAB5BE]">
+                    {priceLabel} · {ticketsPerUnit} {ticketsPerUnit === 1 ? "acceso" : "accesos"}
+                  </p>
                 </div>
-              </>
+
+                {step === "buyer" && (
+                  <>
+                    <p className="text-xs font-semibold uppercase tracking-[.12em] text-[#4ADE80]">Paso 1 de 3 · Datos del comprador</p>
+                    <Field label="Nombre" htmlFor="buyer-name" error={errors.buyer?.name?.message}>
+                      <input id="buyer-name" type="text" className={inputClass(!!errors.buyer?.name)} {...register("buyer.name")} />
+                    </Field>
+                    <Field label="Email" htmlFor="buyer-email" error={errors.buyer?.email?.message}>
+                      <input id="buyer-email" type="email" className={inputClass(!!errors.buyer?.email)} {...register("buyer.email")} />
+                    </Field>
+                    <Field label="WhatsApp" htmlFor="buyer-whatsapp" error={errors.buyer?.whatsapp?.message}>
+                      <input
+                        id="buyer-whatsapp"
+                        type="tel"
+                        placeholder="+5491122334455"
+                        className={inputClass(!!errors.buyer?.whatsapp)}
+                        {...register("buyer.whatsapp")}
+                      />
+                    </Field>
+                    <button type="button" onClick={goToAttendees} className={`pulse-btn-primary mt-2 rounded-full py-3.5 text-sm font-bold uppercase tracking-[.06em] ${FOCUS_RING}`}>
+                      Siguiente
+                    </button>
+                  </>
+                )}
+
+                {step === "attendees" && (
+                  <>
+                    <p className="text-xs font-semibold uppercase tracking-[.12em] text-[#4ADE80]">Paso 2 de 3 · Asistentes</p>
+                    {Array.from({ length: ticketsPerUnit }, (_, i) => (
+                      <Field
+                        key={i}
+                        label={ticketsPerUnit === 1 ? "Nombre del asistente" : ATTENDEE_LABELS[i]}
+                        htmlFor={`attendee-${i}`}
+                        error={errors.attendees?.[i]?.name?.message}
+                      >
+                        <input
+                          id={`attendee-${i}`}
+                          type="text"
+                          className={inputClass(!!errors.attendees?.[i]?.name)}
+                          {...register(`attendees.${i}.name` as const)}
+                        />
+                      </Field>
+                    ))}
+                    <div className="mt-2 flex gap-3">
+                      <button type="button" onClick={() => setStep("buyer")} className={`flex-1 rounded-full border border-[rgba(170,181,190,.3)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#AAB5BE] ${FOCUS_RING}`}>
+                        Atrás
+                      </button>
+                      <button type="button" onClick={goToSummary} className={`pulse-btn-primary flex-1 rounded-full py-3 text-sm font-bold uppercase tracking-[.06em] ${FOCUS_RING}`}>
+                        Siguiente
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {step === "summary" && (
+                  <SummaryStep
+                    ticketTypeName={ticketTypeName}
+                    priceLabel={priceLabel}
+                    ticketsPerUnit={ticketsPerUnit}
+                    onBack={() => setStep("attendees")}
+                    onConfirm={onConfirm}
+                    pending={createMutation.isPending}
+                    error={createError}
+                  />
+                )}
+              </form>
             )}
 
-            {step === "summary" && (
-              <SummaryStep
-                ticketTypeName={ticketTypeName}
-                priceLabel={priceLabel}
-                ticketsPerUnit={ticketsPerUnit}
-                onBack={() => setStep("attendees")}
-                onConfirm={onConfirm}
-                pending={createMutation.isPending}
-                error={createError}
+            {order && liveStatus === "PENDING" && (
+              <PendingOrderView
+                order={order}
+                paymentStatus={paymentStatus}
+                minutesLeft={minutesLeft}
+                isLocallyExpired={isLocallyExpired}
+                onSimulate={(result) => simulateMutation.mutate(result)}
+                onRefresh={() => refreshMutation.mutate()}
+                simulating={simulateMutation.isPending}
+                refreshing={refreshMutation.isPending}
+                simulateError={simulateError}
+                refreshError={refreshError}
               />
             )}
-          </form>
-        )}
 
-        {order && liveStatus === "PENDING" && (
-          <PendingOrderView
-            order={order}
-            paymentStatus={paymentStatus}
-            minutesLeft={minutesLeft}
-            onSimulate={(result) => simulateMutation.mutate(result)}
-            onRefresh={() => refreshMutation.mutate()}
-            simulating={simulateMutation.isPending}
-            refreshing={refreshMutation.isPending}
-          />
-        )}
+            {order && liveStatus === "PAID" && (
+              <ApprovedOrderView
+                order={order}
+                tickets={approvedTickets}
+                onClose={handleClose}
+                onDelivered={() => setTicketsDownloaded(true)}
+              />
+            )}
 
-        {order && liveStatus === "PAID" && (
-          <ApprovedOrderView order={order} tickets={approvedTickets} onClose={handleClose} />
-        )}
+            {order && liveStatus === "CANCELLED" && (
+              <StatusMessageView
+                headline="Compra cancelada"
+                message="Esta reserva fue cancelada. No se generó ningún ticket."
+                tone="red"
+                actionLabel="Cerrar"
+                onAction={handleClose}
+              />
+            )}
 
-        {order && liveStatus === "CANCELLED" && (
-          <StatusMessageView
-            headline="Compra cancelada"
-            message="Esta reserva fue cancelada. No se generó ningún ticket."
-            tone="red"
-            actionLabel="Cerrar"
-            onAction={handleClose}
-          />
+            {order && liveStatus === "EXPIRED" && (
+              <StatusMessageView
+                headline="Reserva vencida"
+                message="Pasaron los 15 minutos de la reserva. Podés iniciar una compra nueva."
+                tone="yellow"
+                actionLabel="Iniciar nueva compra"
+                onAction={handleStartOver}
+              />
+            )}
+          </>
         )}
+      </div>
+    </div>
+  );
+}
 
-        {order && liveStatus === "EXPIRED" && (
-          <StatusMessageView
-            headline="Reserva vencida"
-            message="Pasaron los 15 minutos de la reserva. Podés iniciar una compra nueva."
-            tone="yellow"
-            actionLabel="Iniciar nueva compra"
-            onAction={handleStartOver}
-          />
-        )}
+function CloseConfirmView({ isMultiple, onCancel, onConfirm }: { isMultiple: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-6 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(246,196,83,.14)] text-[#F6C453]">
+        <X size={28} />
+      </div>
+      <h2 role="alert" className="text-xl font-bold text-[#E8EEF2]">
+        Todavía no descargaste {isMultiple ? "tus entradas" : "tu entrada"}
+      </h2>
+      <p className="text-[.95rem] text-[#AAB5BE]">
+        Si cerrás esta ventana, no vamos a poder volver a mostrarte {isMultiple ? "estos códigos QR" : "este código QR"} desde
+        esta sesión.
+      </p>
+      <div className="mt-2 flex w-full gap-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className={`flex-1 rounded-full border border-[rgba(170,181,190,.3)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#AAB5BE] ${FOCUS_RING}`}
+        >
+          Volver a las entradas
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className={`flex-1 rounded-full bg-[rgba(239,68,68,.16)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#f87171] ${FOCUS_RING}`}
+        >
+          Cerrar de todas formas
+        </button>
       </div>
     </div>
   );
@@ -309,14 +399,14 @@ function SummaryStep({
         </p>
       )}
       <div className="mt-2 flex gap-3">
-        <button type="button" onClick={onBack} disabled={pending} className="flex-1 rounded-full border border-[rgba(170,181,190,.3)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#AAB5BE] disabled:opacity-50">
+        <button type="button" onClick={onBack} disabled={pending} className={`flex-1 rounded-full border border-[rgba(170,181,190,.3)] py-3 text-sm font-bold uppercase tracking-[.06em] text-[#AAB5BE] disabled:opacity-50 ${FOCUS_RING}`}>
           Atrás
         </button>
         <button
           type="button"
           onClick={onConfirm}
           disabled={pending}
-          className="pulse-btn-primary flex-1 rounded-full py-3 text-sm font-bold uppercase tracking-[.06em] disabled:cursor-not-allowed disabled:opacity-60"
+          className={`pulse-btn-primary flex-1 rounded-full py-3 text-sm font-bold uppercase tracking-[.06em] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_RING}`}
         >
           {pending ? "Reservando…" : "Confirmar reserva"}
         </button>
@@ -338,18 +428,24 @@ function PendingOrderView({
   order,
   paymentStatus,
   minutesLeft,
+  isLocallyExpired,
   onSimulate,
   onRefresh,
   simulating,
   refreshing,
+  simulateError,
+  refreshError,
 }: {
   order: CreateVipOrderResponse;
   paymentStatus: PaymentStatus | null;
   minutesLeft: number | null;
+  isLocallyExpired: boolean;
   onSimulate: (result: SimulatedPaymentResult) => void;
   onRefresh: () => void;
   simulating: boolean;
   refreshing: boolean;
+  simulateError: string | null;
+  refreshError: string | null;
 }) {
   return (
     <div className="flex flex-col items-center gap-4 py-4 text-center">
@@ -363,7 +459,7 @@ function PendingOrderView({
       </p>
       {minutesLeft !== null && (
         <p role="status" className="text-sm font-semibold text-[#F6C453]">
-          {minutesLeft > 0 ? `Quedan ~${minutesLeft} min de reserva.` : "La reserva está por vencer."}
+          {isLocallyExpired ? "La reserva venció. Actualizá el estado para confirmarlo." : `Quedan ~${minutesLeft} min de reserva.`}
         </p>
       )}
 
@@ -373,16 +469,28 @@ function PendingOrderView({
         </p>
       )}
 
+      {simulateError && (
+        <p role="alert" className="rounded-lg bg-[rgba(239,68,68,.12)] px-3 py-2 text-sm text-[#f87171]">
+          {simulateError}
+        </p>
+      )}
+
+      {refreshError && (
+        <p role="alert" className="rounded-lg bg-[rgba(239,68,68,.12)] px-3 py-2 text-sm text-[#f87171]">
+          {refreshError}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={onRefresh}
         disabled={refreshing}
-        className="text-xs font-semibold uppercase tracking-[.08em] text-[#AAB5BE] underline-offset-2 hover:underline disabled:opacity-50"
+        className={`rounded text-xs font-semibold uppercase tracking-[.08em] text-[#AAB5BE] underline-offset-2 hover:underline disabled:opacity-50 ${FOCUS_RING}`}
       >
         {refreshing ? "Actualizando…" : "Actualizar estado"}
       </button>
 
-      {import.meta.env.DEV && order.paymentSimulationAvailable && (
+      {!isLocallyExpired && import.meta.env.DEV && order.paymentSimulationAvailable && (
         <SimulatePaymentControls onSimulate={onSimulate} disabled={simulating} />
       )}
     </div>
@@ -393,11 +501,38 @@ function ApprovedOrderView({
   order,
   tickets,
   onClose,
+  onDelivered,
 }: {
   order: CreateVipOrderResponse;
   tickets: SimulatedTicket[] | null;
   onClose: () => void;
+  onDelivered: () => void;
 }) {
+  const ticketRefs = useRef<Array<EventTicketHandle | null>>([]);
+  const isMultiple = (tickets?.length ?? 0) > 1;
+
+  const fileName = !tickets
+    ? ""
+    : isMultiple
+      ? `pulse-event-vip-doble-${sanitizeFileNameId(order.orderPublicId)}.pdf`
+      : `pulse-event-vip-individual-${sanitizeFileNameId(tickets[0].ticketPublicId)}.pdf`;
+
+  const delivery = useTicketPdfDelivery({
+    getCaptures: async () => {
+      if (!tickets) throw new Error("no-tickets");
+      return Promise.all(
+        tickets.map((_, index) => {
+          const handle = ticketRefs.current[index];
+          if (!handle) throw new Error("ticket-not-ready");
+          return handle.generateCapture();
+        }),
+      );
+    },
+    fileName,
+    shareTitle: isMultiple ? "Tus entradas VIP Doble — Pulse Event" : "Tu entrada VIP — Pulse Event",
+    onDelivered,
+  });
+
   return (
     <div className="flex flex-col items-center gap-5 py-4 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(74,222,128,.14)] text-[#4ADE80]">
@@ -410,15 +545,29 @@ function ApprovedOrderView({
 
       {tickets ? (
         <div className="flex w-full flex-col items-center gap-8">
-          {tickets.map((ticket) => (
+          {tickets.map((ticket, index) => (
             <EventTicket
               key={ticket.ticketPublicId}
+              ref={(handle) => {
+                ticketRefs.current[index] = handle;
+              }}
               token={ticket.token}
               attendeeName={ticket.holderName}
               ticketType={ticket.ticketType}
               ticketPublicId={ticket.ticketPublicId}
             />
           ))}
+
+          <TicketDeliveryButtons
+            downloadLabel={isMultiple ? "Descargar ambas entradas" : "Descargar entrada"}
+            preparingLabel={isMultiple ? "Preparando ambas entradas…" : "Preparando entrada…"}
+            shareLabel={isMultiple ? "Compartir ambas entradas" : "Compartir entrada"}
+            status={delivery.status}
+            error={delivery.error}
+            canShare={supportsFileShare()}
+            onDownload={delivery.download}
+            onShare={delivery.share}
+          />
         </div>
       ) : (
         <p role="alert" className="rounded-lg bg-[rgba(246,196,83,.12)] px-3 py-2 text-sm text-[#F6C453]">
@@ -430,7 +579,7 @@ function ApprovedOrderView({
       <button
         type="button"
         onClick={onClose}
-        className="pulse-btn-primary rounded-full px-8 py-3 text-sm font-bold uppercase tracking-[.06em]"
+        className={`pulse-btn-primary rounded-full px-8 py-3 text-sm font-bold uppercase tracking-[.06em] ${FOCUS_RING}`}
       >
         Cerrar
       </button>
@@ -465,7 +614,7 @@ function StatusMessageView({
       <button
         type="button"
         onClick={onAction}
-        className="pulse-btn-primary rounded-full px-8 py-3 text-sm font-bold uppercase tracking-[.06em]"
+        className={`pulse-btn-primary rounded-full px-8 py-3 text-sm font-bold uppercase tracking-[.06em] ${FOCUS_RING}`}
       >
         {actionLabel}
       </button>

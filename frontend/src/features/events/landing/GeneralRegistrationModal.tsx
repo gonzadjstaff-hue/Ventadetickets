@@ -1,13 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 
 import { ApiError } from "../../../api/client";
 import { registerGeneralTicket, type GeneralRegistrationResponse } from "../../../api/registrations";
 import { demoEvent } from "../../../config/demoEvent";
-import EventTicket from "./EventTicket";
+import TicketDeliveryButtons from "../ticketExport/TicketDeliveryButtons";
+import { supportsFileShare } from "../ticketExport/share";
+import { sanitizeFileNameId } from "../ticketExport/ticketPdf";
+import { useTicketPdfDelivery } from "../ticketExport/useTicketPdfDelivery";
+import EventTicket, { type EventTicketHandle } from "./EventTicket";
 import {
   generalRegistrationFormSchema,
   type GeneralRegistrationFormValues,
@@ -52,6 +56,16 @@ export default function GeneralRegistrationModal({ open, onClose }: GeneralRegis
         }
       }
     },
+  });
+
+  const ticketRef = useRef<EventTicketHandle | null>(null);
+  const delivery = useTicketPdfDelivery({
+    getCaptures: async () => {
+      if (!ticketRef.current) throw new Error("ticket-not-ready");
+      return [await ticketRef.current.generateCapture()];
+    },
+    fileName: result ? `pulse-event-general-${sanitizeFileNameId(result.ticketPublicId)}.pdf` : "",
+    shareTitle: "Tu entrada General — Pulse Event",
   });
 
   if (!open) return null;
@@ -108,10 +122,22 @@ export default function GeneralRegistrationModal({ open, onClose }: GeneralRegis
             )}
 
             <EventTicket
+              ref={ticketRef}
               token={result.ticketToken}
               attendeeName={result.attendeeName}
               ticketType={result.ticketType}
               ticketPublicId={result.ticketPublicId}
+            />
+
+            <TicketDeliveryButtons
+              downloadLabel="Descargar entrada"
+              preparingLabel="Preparando entrada…"
+              shareLabel="Compartir entrada"
+              status={delivery.status}
+              error={delivery.error}
+              canShare={supportsFileShare()}
+              onDownload={delivery.download}
+              onShare={delivery.share}
             />
 
             <button

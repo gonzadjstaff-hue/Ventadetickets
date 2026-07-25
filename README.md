@@ -106,7 +106,7 @@ Los tests del backend corren contra una base de datos separada de la de desarrol
 
 Implementado: la landing pública del evento demo, el **registro gratuito de entrada General**, **QR real** con entrada descargable, **envío por email** (General y VIP), **validación de acceso por QR** (check-in, MVP sin autenticación) y la **venta de entradas VIP Individual y VIP Doble con pago simulado** (sin Mercado Pago real todavía). Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
-El registro General y el check-in están probados de punta a punta contra navegador real; la venta VIP está probada con la suite automatizada (94 tests backend + 70 tests frontend) y tuvo una primera prueba manual parcial (VIP Individual aprobada, hasta la emisión del ticket) — VIP Doble, rechazo, cancelación y el resto de VIP Individual (descarga y check-in) todavía no se probaron a mano.
+El registro General, el check-in y la venta VIP (Individual y Doble) están probados de punta a punta contra navegador real, además de la suite automatizada (94 tests backend + 116 tests frontend). La descarga/compartir de entradas en PDF y el resto de la auditoría del checkout (ver [`docs/PROGRESS.md`](./docs/PROGRESS.md)) todavía **no** tuvieron prueba manual en navegador — solo automatizada.
 
 Todavía **no** hay autenticación, Mercado Pago real, WhatsApp, CRM, panel administrativo, reportes ni deploy.
 

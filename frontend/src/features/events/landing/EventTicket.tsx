@@ -1,5 +1,5 @@
 import { toPng } from "html-to-image";
-import { useRef, useState, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, useRef, type ReactNode } from "react";
 
 import { eventInfo } from "./mockData";
 import TicketQrCode from "./TicketQrCode";
@@ -11,44 +11,105 @@ interface EventTicketProps {
   ticketPublicId: string;
 }
 
+export interface TicketCapture {
+  /** PNG en `data:` URL, ya recortado a las dimensiones reales del nodo (ver `measureExportSize`). */
+  dataUrl: string;
+  /** Ancho/alto en px CSS usados para la captura (antes de `pixelRatio`) — el que necesita el PDF para calcular la relación de aspecto real. */
+  width: number;
+  height: number;
+}
+
+/** API imperativa mínima para que un padre (descarga/compartir en PDF, ver
+ * `frontend/src/features/events/ticketExport/`) pueda generar la captura de
+ * este ticket sin que el propio componente dispare ninguna descarga — la
+ * descarga/compartir es responsabilidad exclusiva del padre, unificada entre
+ * General, VIP Individual y VIP Doble. */
+export interface EventTicketHandle {
+  generateCapture: () => Promise<TicketCapture>;
+}
+
 /** Ancho fijo del nodo exportado: la entrada descargada debe verse siempre
  * igual, sin importar el tamaño del modal o del viewport que la generó. En
  * pantallas angostas, el contenedor de abajo permite scroll horizontal en vez
  * de achicar la entrada. */
 const TICKET_EXPORT_WIDTH = 340;
 
-export default function EventTicket({ token, attendeeName, ticketType, ticketPublicId }: EventTicketProps) {
-  const ticketRef = useRef<HTMLDivElement | null>(null);
-  const [qrReady, setQrReady] = useState(false);
-  const [qrFailed, setQrFailed] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportFailed, setExportFailed] = useState(false);
+type QrStatus = "pending" | "ready" | "failed";
 
-  const handleDownload = async () => {
-    if (!ticketRef.current) return;
-
-    setExporting(true);
-    setExportFailed(false);
-
-    try {
-      const pngDataUrl = await toPng(ticketRef.current, {
-        pixelRatio: 2,
-        cacheBust: true,
-        width: ticketRef.current.offsetWidth,
-        height: ticketRef.current.offsetHeight,
-      });
-
-      const link = document.createElement("a");
-      link.href = pngDataUrl;
-      link.download = `pulse-event-ticket-${ticketPublicId}.png`;
-      link.click();
-    } catch {
-      // No se loguea: evitamos dejar rastro de cualquier detalle interno del fallo.
-      setExportFailed(true);
-    } finally {
-      setExporting(false);
-    }
+/**
+ * Mide el nodo con `getBoundingClientRect()` (preciso, con decimales) en vez
+ * de `offsetWidth`/`offsetHeight` (enteros, redondeados por el navegador) y
+ * redondea siempre hacia arriba. Causa real del recorte del borde derecho que
+ * tenía la descarga: cuando el ancho de layout real era, por ejemplo,
+ * 339.6px, `offsetWidth` podía devolver 339 (redondeo hacia abajo en algunos
+ * motores), y pedirle a `html-to-image` que capture exactamente esos 339px
+ * recortaba ~0.6px de contenido real en el borde derecho — imperceptible a
+ * pixelRatio 1, pero un corte visible una vez escalado a pixelRatio 2. El
+ * fallback a `offsetWidth`/`offsetHeight` es solo defensivo (nunca debería
+ * activarse fuera de un entorno de test sin layout real, donde
+ * `getBoundingClientRect` devuelve 0).
+ */
+function measureExportSize(node: HTMLElement): { width: number; height: number } {
+  const rect = node.getBoundingClientRect();
+  return {
+    width: Math.ceil(rect.width) || node.offsetWidth,
+    height: Math.ceil(rect.height) || node.offsetHeight,
   };
+}
+
+/**
+ * Espera a que las fuentes web hayan terminado de cargar antes de capturar.
+ * Si `toPng` captura mientras el navegador todavía está mostrando la fuente
+ * de reemplazo (FOUT), el texto puede angostarse o ensancharse apenas
+ * termine de cargar la fuente real — otra fuente conocida de recortes en
+ * `html-to-image`, independiente del cálculo de ancho de arriba.
+ */
+async function waitForFontsReady(): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) return;
+  try {
+    await document.fonts.ready;
+  } catch {
+    // Si falla la espera, mejor capturar igual que bloquear la descarga.
+  }
+}
+
+const EventTicket = forwardRef<EventTicketHandle, EventTicketProps>(function EventTicket(
+  { token, attendeeName, ticketType, ticketPublicId },
+  ref,
+) {
+  const ticketRef = useRef<HTMLDivElement | null>(null);
+
+  // Permite esperar de forma async a que el QR esté listo (o haya fallado),
+  // sin importar si `generateCapture` se llama antes o después de que
+  // TicketQrCode termine de generarlo — evita una carrera entre el padre
+  // (descarga/compartir) y el QR todavía en construcción.
+  const qrStatusRef = useRef<QrStatus>("pending");
+  const qrWaitersRef = useRef<Array<(status: QrStatus) => void>>([]);
+
+  function resolveQrStatus(status: QrStatus) {
+    qrStatusRef.current = status;
+    const waiters = qrWaitersRef.current;
+    qrWaitersRef.current = [];
+    waiters.forEach((resolve) => resolve(status));
+  }
+
+  function waitForQrStatus(): Promise<QrStatus> {
+    if (qrStatusRef.current !== "pending") return Promise.resolve(qrStatusRef.current);
+    return new Promise((resolve) => qrWaitersRef.current.push(resolve));
+  }
+
+  async function generateCapture(): Promise<TicketCapture> {
+    if (!ticketRef.current) throw new Error("ticket-not-mounted");
+    const status = await waitForQrStatus();
+    if (status === "failed") throw new Error("qr-generation-failed");
+
+    await waitForFontsReady();
+    const { width, height } = measureExportSize(ticketRef.current);
+    const dataUrl = await toPng(ticketRef.current, { pixelRatio: 2, cacheBust: true, width, height });
+    return { dataUrl, width, height };
+  }
+
+  useImperativeHandle(ref, () => ({ generateCapture }));
 
   return (
     <div className="flex w-full flex-col items-center gap-4">
@@ -81,14 +142,8 @@ export default function EventTicket({ token, attendeeName, ticketType, ticketPub
             <div className="relative flex justify-center px-6 pb-4">
               <TicketQrCode
                 token={token}
-                onReady={() => {
-                  setQrReady(true);
-                  setQrFailed(false);
-                }}
-                onError={() => {
-                  setQrReady(false);
-                  setQrFailed(true);
-                }}
+                onReady={() => resolveQrStatus("ready")}
+                onError={() => resolveQrStatus("failed")}
               />
             </div>
 
@@ -120,24 +175,11 @@ export default function EventTicket({ token, attendeeName, ticketType, ticketPub
       <p className="text-center text-sm text-[#AAB5BE]">
         Guardá esta entrada. La vas a necesitar para ingresar al evento.
       </p>
-
-      <button
-        type="button"
-        onClick={handleDownload}
-        disabled={!qrReady || qrFailed || exporting}
-        className="pulse-btn-outline inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold uppercase tracking-[.06em] text-[#E8EEF2] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {exporting ? "Generando…" : "Descargar entrada"}
-      </button>
-
-      {exportFailed && (
-        <p role="alert" className="rounded-lg bg-[rgba(239,68,68,.12)] px-3 py-2 text-center text-sm text-[#f87171]">
-          No pudimos exportar tu entrada. Tu registro ya está confirmado; podés cerrar esta ventana.
-        </p>
-      )}
     </div>
   );
-}
+});
+
+export default EventTicket;
 
 function DetailRow({
   label,

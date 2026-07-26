@@ -1,0 +1,73 @@
+# Blueprint opcional de Render, en la raíz del repo (monorepo con backend/ y
+# frontend/ — Render Blueprints solo aplican al backend, el frontend se
+# despliega en Vercel por fuera de este archivo).
+#
+# Es un punto de partida, no un requisito: el backend se puede configurar
+# igual de bien a mano en el dashboard de Render siguiendo
+# docs/DEPLOYMENT.md — de hecho esa es la vía documentada paso a paso y la
+# más robusta ante cambios futuros en el formato exacto de este archivo.
+# Antes de importar esto como Blueprint, verificar los nombres de campo
+# contra la documentación vigente de Render (pueden evolucionar).
+#
+# Ningún secreto vive en este archivo. Las variables sensibles quedan
+# `sync: false`: Render pide cargarlas a mano en el dashboard la primera vez
+# y nunca las vuelve a sobreescribir en deploys siguientes a partir de este
+# archivo. "ticketing-db" / "ticketing-backend" son nombres de referencia —
+# renombralos como prefieras al importar.
+databases:
+  - name: ticketing-db
+    plan: starter
+    databaseName: tickets_db
+    user: tickets_app
+
+services:
+  - type: web
+    name: ticketing-backend
+    env: node
+    rootDir: backend
+    plan: starter
+    buildCommand: npm install && npm run build
+    # prisma:deploy corre "prisma migrate deploy" (nunca "migrate dev" ni
+    # "db push") antes de levantar el proceso — ver docs/DEPLOYMENT.md sobre
+    # por qué se eligió este orden y no un paso de "release" separado.
+    startCommand: npm run prisma:deploy && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ticketing-db
+          property: connectionString
+      # Cargar a mano en el dashboard (ver docs/DEPLOYMENT.md paso a paso):
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: APP_PUBLIC_URL
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
+      # Mercado Pago deshabilitado por defecto hasta validar manualmente
+      # (ver docs/DEPLOYMENT.md) — activar ENABLE_MERCADOPAGO_CHECKOUT recién
+      # cuando MERCADOPAGO_ACCESS_TOKEN/MERCADOPAGO_WEBHOOK_SECRET ya estén
+      # cargados.
+      - key: ENABLE_MERCADOPAGO_CHECKOUT
+        value: "false"
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      # Opcional (ver docs/LOCAL_SETUP.md) — dejar sin cargar si no se usa envío real de email:
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Deben permanecer en "false"/sin cargar en producción — ver
+      # docs/DEPLOYMENT.md, sección de seguridad.
+      - key: ENABLE_MVP_CHECKIN
+        value: "false"
+      - key: ENABLE_MVP_PAYMENT_SIMULATOR
+        value: "false"

@@ -21,6 +21,6 @@ Orden sugerido para las próximas fases, a partir del estado actual (ver `docs/P
 6. **WhatsApp** — notificaciones y recordatorios. No tiene carpeta de integración reservada todavía.
 7. **CRM** — base de contactos/segmentos de asistentes.
 8. **Administración y reportes** — panel admin (`backend/src/modules/admin/`, vacío), gestión de eventos/órdenes/tickets, exportaciones, estadísticas.
-9. **Deploy** — puesta en producción de frontend y backend.
+9. **Deploy** — el repositorio ya está **preparado** (frontend en Vercel, backend en Render, PostgreSQL administrado en Render — CORS multi-origen, health check, cierre controlado, `prisma migrate deploy`, `render.yaml`/`vercel.json` de referencia, ver `docs/DEPLOYMENT.md`), pero **todavía no se ejecutó ningún despliegue real** ni se cargó ninguna credencial en Vercel/Render/Mercado Pago.
 
 Fuera de este orden, pendiente sin fecha asignada: **autenticación** (Firebase, pensada para administradores y validadores — hoy tanto check-in como el simulador de pago son MVP sin auth, explícitamente marcados como no aptos para producción) y **Meta Pixel**.

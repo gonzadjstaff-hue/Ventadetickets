@@ -109,7 +109,7 @@ Implementado: la landing pública del evento demo, el **registro gratuito de ent
 
 El registro General, el check-in y la venta VIP (Individual y Doble) están probados de punta a punta contra navegador real, además de la suite automatizada (**148 tests backend + 133 tests frontend**). La descarga/compartir de entradas en PDF y el checkout de Mercado Pago (ver [`docs/PROGRESS.md`](./docs/PROGRESS.md)) todavía **no** tuvieron prueba manual en navegador — solo automatizada; Mercado Pago además necesita credenciales de prueba reales y una URL pública, ver [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md).
 
-Todavía **no** hay credenciales productivas de Mercado Pago, autenticación, WhatsApp, CRM, panel administrativo, reportes ni deploy.
+Todavía **no** hay credenciales productivas de Mercado Pago, autenticación, WhatsApp, CRM, panel administrativo ni reportes. El repositorio ya está **preparado** para desplegarse (frontend en Vercel, backend en Render, PostgreSQL administrado en Render) — ver [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — pero **todavía no se desplegó nada**.
 
 ## Funcionalidades pendientes
 
@@ -126,3 +126,4 @@ Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: vali
 | [`docs/PROGRESS.md`](./docs/PROGRESS.md) | Qué está hecho y qué falta |
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Orden sugerido de las próximas fases |
 | [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md) | Cómo levantar el entorno local paso a paso |
+| [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | Guía manual de despliegue: Vercel (frontend), Render (backend + PostgreSQL), Mercado Pago en el entorno desplegado |

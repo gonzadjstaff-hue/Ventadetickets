@@ -16,6 +16,15 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   FRONTEND_URL: z.string().url().default("http://localhost:5173"),
+  /**
+   * Orígenes adicionales permitidos por CORS, separados por coma (ej. el
+   * dominio de producción del frontend en Vercel, y opcionalmente URLs de
+   * preview). FRONTEND_URL siempre queda permitido — esto suma orígenes
+   * extra sin reemplazarlo, para no perder la compatibilidad con
+   * http://localhost:5173 en desarrollo. Ver CORS_ALLOWED_ORIGINS_LIST más
+   * abajo y backend/src/app.ts.
+   */
+  CORS_ALLOWED_ORIGINS: z.preprocess(emptyToUndefined, z.string().optional()),
   DATABASE_URL: z.string().min(1),
   /**
    * MVP temporal: habilita POST /api/events/:eventPublicId/check-ins, que
@@ -130,7 +139,23 @@ const MERCADOPAGO_CHECKOUT_AVAILABLE = Boolean(
     parsedEnv.BACKEND_PUBLIC_URL,
 );
 
-export const env: Env & { MERCADOPAGO_CHECKOUT_AVAILABLE: boolean } = {
+/**
+ * Lista final de orígenes permitidos por CORS: FRONTEND_URL siempre incluido
+ * (nunca hay que duplicarlo en CORS_ALLOWED_ORIGINS), más los orígenes
+ * adicionales de CORS_ALLOWED_ORIGINS (si está definida), separados por coma,
+ * recortados y sin duplicados. Único lugar que arma esta lista — app.ts la
+ * consume tal cual, nunca recalcula el parseo por su cuenta.
+ */
+const CORS_ALLOWED_ORIGINS_LIST = Array.from(
+  new Set(
+    [parsedEnv.FRONTEND_URL, ...(parsedEnv.CORS_ALLOWED_ORIGINS?.split(",") ?? [])]
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  ),
+);
+
+export const env: Env & { MERCADOPAGO_CHECKOUT_AVAILABLE: boolean; CORS_ALLOWED_ORIGINS_LIST: string[] } = {
   ...parsedEnv,
   MERCADOPAGO_CHECKOUT_AVAILABLE,
+  CORS_ALLOWED_ORIGINS_LIST,
 };

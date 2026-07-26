@@ -15,10 +15,34 @@ import { registrationsRouter } from "./modules/registrations/routes.js";
 export function createApp(): Express {
   const app = express();
 
+  // Render (y cualquier proxy inverso equivalente) entrega la app detrás de
+  // un único hop de proxy: sin esto, express-rate-limit y req.ip verían
+  // siempre la IP del proxy, no la del cliente real. "1" (no `true`) confía
+  // exactamente en ese hop, nunca en cualquier X-Forwarded-For arbitrario.
+  if (env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+
   app.use(helmet());
   app.use(
     cors({
-      origin: env.FRONTEND_URL,
+      // Función en vez de un string fijo: permite el frontend local
+      // (FRONTEND_URL, default http://localhost:5173) y, en producción, el
+      // dominio de Vercel y cualquier otro origen agregado explícitamente en
+      // CORS_ALLOWED_ORIGINS (ver config/env.ts) — nunca "*", porque request
+      // sin un origen exacto no tendría sentido bloquear selectivamente acá.
+      // Requests sin header Origin (curl, health checks, y el webhook
+      // server-to-server de Mercado Pago) siempre pasan: CORS es una
+      // restricción que solo aplican los navegadores, nunca protege al
+      // webhook — esa autenticidad la da la firma x-signature, no CORS (ver
+      // docs/DECISIONS.md).
+      origin(origin, callback) {
+        if (!origin || env.CORS_ALLOWED_ORIGINS_LIST.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
     }),
   );
   app.use(

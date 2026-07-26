@@ -20,8 +20,9 @@
 
 `backend/` — Node.js + Express 5 + TypeScript + Prisma.
 
-- **`src/app.ts`** — arma la app Express: `helmet`, `cors` (restringido a `FRONTEND_URL`), rate limiting, `express.json()`, el endpoint `GET /api/health`, y los routers de cada módulo montados en `/api/events` (`registrations`, `orders`, checkout de Mercado Pago) o `/api/dev` (`payments`, simulador) o en la raíz de `/api` (webhook de Mercado Pago). Los routers de MVP temporales (`check-in`, simulador de pago) y los de Mercado Pago (checkout + webhook) solo se montan si su variable de entorno correspondiente está efectivamente disponible — si no, Express responde 404 estándar para esas rutas, como si no existieran.
-- **`src/config/env.ts`** — valida las variables de entorno con Zod al arrancar. Trata strings vacíos (placeholders de `.env.example` sin completar) como si la variable no estuviera definida, para que el backend pueda arrancar igual con integraciones opcionales sin configurar.
+- **`src/app.ts`** — arma la app Express: `trust proxy` (solo si `NODE_ENV=production`, necesario detrás del proxy inverso de Render — ver `docs/DEPLOYMENT.md`), `helmet`, `cors` (función que permite `FRONTEND_URL` más cualquier origen adicional listado en `CORS_ALLOWED_ORIGINS`, nunca `"*"`; las requests sin header `Origin` — curl, health checks, el webhook de Mercado Pago — siempre pasan, porque CORS no protege a un webhook server-to-server), rate limiting, `express.json()`, el endpoint `GET /api/health`, y los routers de cada módulo montados en `/api/events` (`registrations`, `orders`, checkout de Mercado Pago) o `/api/dev` (`payments`, simulador) o en la raíz de `/api` (webhook de Mercado Pago). Los routers de MVP temporales (`check-in`, simulador de pago) y los de Mercado Pago (checkout + webhook) solo se montan si su variable de entorno correspondiente está efectivamente disponible — si no, Express responde 404 estándar para esas rutas, como si no existieran.
+- **`src/server.ts`** — instancia `createApp()` y escucha en `env.PORT`/`"0.0.0.0"`. Captura `SIGTERM`/`SIGINT` (la señal que Render manda al reciclar o detener una instancia) para un cierre controlado: deja de aceptar conexiones nuevas y recién después desconecta Prisma.
+- **`src/config/env.ts`** — valida las variables de entorno con Zod al arrancar. Trata strings vacíos (placeholders de `.env.example` sin completar) como si la variable no estuviera definida, para que el backend pueda arrancar igual con integraciones opcionales sin configurar. También deriva `CORS_ALLOWED_ORIGINS_LIST` (array final de orígenes permitidos por CORS: `FRONTEND_URL` más los de `CORS_ALLOWED_ORIGINS`, separados por coma) una sola vez al arrancar — mismo criterio que `MERCADOPAGO_CHECKOUT_AVAILABLE`.
 - **`src/shared/`**:
   - `prisma.ts` — instancia única de `PrismaClient`.
   - `AppError.ts` — clase base para errores de dominio (`code`, `message`, `statusCode`).
@@ -35,7 +36,12 @@
 - Postgres 16 corriendo en Docker en desarrollo (contenedor `tickets-db`, base `tickets_db`), ver `docs/LOCAL_SETUP.md`.
 - `backend/prisma/schema.prisma` es la única fuente de verdad del modelo de datos — detalle completo en `docs/DATA_MODEL.md`.
 - Migraciones versionadas en `backend/prisma/migrations/`. Hasta ahora: `init` (esquema inicial), `make_firebase_uid_optional` (`User.firebaseUid` opcional), `add_order_item_attendee_names` (`OrderItem.attendeeNames Json?`, para la compra VIP) y `add_order_provider_preference_id` (`Order.providerPreferenceId String?`, nullable, para reutilizar la preferencia de Checkout Pro de Mercado Pago — ver `docs/DECISIONS.md`).
-- `backend/prisma/seed.ts` — seed de desarrollo idempotente (usa `upsert` con IDs fijos), crea un evento demo publicado y sus 3 tipos de entrada. No se ejecuta automáticamente; se corre a mano con `npm run db:seed`.
+- `backend/prisma/seed.ts` — seed de desarrollo idempotente (usa `upsert` con IDs fijos), crea un evento demo publicado y sus 3 tipos de entrada. No se ejecuta automáticamente; se corre a mano con `npm run db:seed` (tampoco en producción — ver `docs/DEPLOYMENT.md`).
+- `backend/package.json`: `postinstall` corre `prisma generate` automáticamente después de cualquier `npm install` (local o en Render); `prisma:deploy` corre `prisma migrate deploy` (nunca `migrate dev` ni `db push`) — encadenado al comando de arranque en producción, ver `docs/DEPLOYMENT.md`.
+
+## Despliegue
+
+Preparado (no ejecutado) para: frontend en Vercel (`frontend/vercel.json`, rewrite de SPA para las rutas de React Router), backend en Render (`render.yaml` en la raíz, opcional — Blueprint de referencia, la vía documentada paso a paso es configurar el Web Service a mano) y PostgreSQL administrado en Render. Guía completa, con las variables exactas de cada entorno, en `docs/DEPLOYMENT.md`.
 
 ## Flujo de registro General
 

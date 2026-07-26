@@ -38,6 +38,7 @@ Completar en `backend/.env` como mínimo:
 | `DATABASE_URL_TEST` | Opcional. Si se deja vacía, se deriva automáticamente de `DATABASE_URL` apuntando a `tickets_test`. |
 | `PORT` | `4000` (default). |
 | `FRONTEND_URL` | `http://localhost:5173` (default) — usado para la config de CORS. |
+| `CORS_ALLOWED_ORIGINS` | Vacío en desarrollo (no hace falta, `FRONTEND_URL` ya cubre `localhost:5173`). Orígenes adicionales separados por coma, para producción — ver `docs/DEPLOYMENT.md`. |
 | `ENABLE_MVP_CHECKIN` | `true` para poder probar `/check-in` a mano. MVP sin autenticación — nunca activarlo así en un entorno público. `false`/vacío por defecto. |
 | `ENABLE_MVP_PAYMENT_SIMULATOR` | `true` para poder probar la compra VIP a mano (ver paso 5 más abajo). Sin proveedor de pago real detrás — nunca activarlo así en un entorno público. `false`/vacío por defecto. |
 | `EMAIL_PROVIDER` | `console` para probar el envío de email (General y VIP) sin credenciales reales ni riesgo de mandar un correo real por error — solo loguea un resumen seguro. Vacío = integración deshabilitada. `resend` requiere además `EMAIL_API_KEY` y `EMAIL_FROM`. |
@@ -52,8 +53,7 @@ Completar en `backend/.env` como mínimo:
 Firebase, `MERCADOPAGO_PUBLIC_KEY`, `MERCADOPAGO_API_BASE_URL` y `QR_SIGNING_SECRET` todavía no se usan en ningún código: pueden quedar vacías (ver `docs/DECISIONS.md` para por qué, en el caso de Mercado Pago).
 
 ```bash
-npm install
-npx prisma generate
+npm install   # dispara automáticamente "prisma generate" (script postinstall)
 
 # Migraciones
 npx prisma migrate deploy      # aplica las migraciones existentes a tickets_db
@@ -140,3 +140,7 @@ No se incluyen pasos automáticos para exponer `localhost` (instalar/configurar 
 10. **Verificar pago, email, tickets y check-in** — la pantalla `/checkout/return` debería pasar de "Verificando pago…" a "Pago confirmado. Enviamos tus entradas por email." (nunca muestra el QR ahí). Revisar el email (o la consola, si `EMAIL_PROVIDER=console`) para confirmar que llegó el ticket. Si `ENABLE_MVP_CHECKIN=true`, probar el QR en `/check-in`: `VALID` la primera vez, `ALREADY_USED` al repetir.
 
 Verificado con tests automatizados (backend y frontend, con el proveedor mockeado — ver `docs/PROGRESS.md`); **ninguna prueba manual real contra la API de Mercado Pago todavía** — no hay credenciales de prueba ni URL pública configuradas en este entorno.
+
+## 7. Despliegue (Vercel + Render)
+
+Este documento cubre únicamente el entorno **local**. Para desplegar el frontend en Vercel, el backend en Render y una base PostgreSQL administrada en Render (incluyendo Mercado Pago contra la URL pública estable del backend en vez de un túnel), ver la guía paso a paso completa en [`docs/DEPLOYMENT.md`](./DEPLOYMENT.md) — nada de eso está desplegado todavía.

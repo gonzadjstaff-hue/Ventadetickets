@@ -1,4 +1,19 @@
-const API_URL = import.meta.env.VITE_API_URL as string;
+/**
+ * VITE_API_URL: URL pública del backend, sin `/api` al final (ver
+ * docs/LOCAL_SETUP.md). En desarrollo, si no está definida, cae a
+ * `http://localhost:4000` como red de seguridad; en producción/preview NO
+ * hay fallback — si falta, se prefiere fallar fuerte al arrancar en vez de
+ * apuntar en silencio a localhost (que ahí sería siempre incorrecto). Ver
+ * docs/DEPLOYMENT.md.
+ */
+const configuredApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+const API_URL = configuredApiUrl ?? (import.meta.env.DEV ? "http://localhost:4000" : undefined);
+
+if (!API_URL) {
+  throw new Error(
+    "VITE_API_URL no está configurada. Definila en las variables de entorno del entorno de despliegue (ver docs/DEPLOYMENT.md).",
+  );
+}
 
 interface ApiErrorBody {
   error?: {

@@ -180,3 +180,31 @@ El envío de email ocurre después de que la transacción de Prisma (Order → P
 ### Sin persistencia insegura
 
 En ningún punto de este bloque se guarda un token crudo de ticket, el `access token`, el `webhook secret`, ni el payload completo de un pago (solo se persiste en `PaymentWebhookEvent.payload` el body ya validado por Zod del webhook, que de por sí no trae datos de tarjeta ni PII del comprador más allá de un `user_id` numérico propio de Mercado Pago — nunca el payload crudo sin filtrar). Nada se guarda en `localStorage`/`sessionStorage`/cookies/URL del lado del frontend.
+
+## Preparación para despliegue (Vercel + Render), sin desplegar
+
+Bloque que adapta el repositorio para que pueda desplegarse en Vercel (frontend), Render (backend) y PostgreSQL administrado en Render, sin ejecutar ningún despliegue real ni tocar cuentas externas. Detalle operativo completo (variables, pasos) en `docs/DEPLOYMENT.md`; acá solo las decisiones no obvias.
+
+### CORS multi-origen con función, nunca `"*"`
+
+`cors({ origin: env.FRONTEND_URL })` (un string fijo) no alcanza para tener a la vez el frontend local y el de producción en Vercel permitidos. Se reemplazó por una función (`backend/src/app.ts`) que valida el `Origin` de cada request contra `env.CORS_ALLOWED_ORIGINS_LIST` (`FRONTEND_URL` + lo que declare `CORS_ALLOWED_ORIGINS`, separados por coma — derivado una sola vez en `config/env.ts`, mismo patrón que `MERCADOPAGO_CHECKOUT_AVAILABLE`). Se descartó deliberadamente un patrón que permitiera automáticamente cualquier subdominio `*.vercel.app`: eso habilitaría que **cualquier** proyecto de Vercel (no solo el propio) hiciera requests de navegador contra el backend — cada preview que se quiera permitir se agrega a mano en `CORS_ALLOWED_ORIGINS`. Las requests sin header `Origin` (curl, health checks, y el webhook server-to-server de Mercado Pago) siempre pasan: CORS es una restricción exclusiva de navegadores, nunca protege a un webhook — esa autenticidad ya la da la firma `x-signature` (ver más arriba), nunca CORS.
+
+### `trust proxy` solo en producción
+
+`app.set("trust proxy", 1)` se activa únicamente cuando `NODE_ENV=production` (`backend/src/app.ts`), no siempre. Detrás del proxy inverso de Render, sin esto `req.ip` (que usa `express-rate-limit` para contar por IP) vería siempre la IP del proxy, no la del cliente real — degradando el rate limiting a un único balde compartido por todos los clientes. `1` (nunca `true`) confía exactamente en un hop, el mínimo necesario y el recomendado por Express para este escenario (un único proxy inverso al frente) — `true` confiaría en cualquier `X-Forwarded-For` que llegara, que es falsificable por un cliente directo si algún día no hay proxy de por medio.
+
+### `VITE_API_URL` se mantiene: no se renombra a `VITE_API_BASE_URL`
+
+El enunciado de este bloque sugería `VITE_API_BASE_URL` como nombre de ejemplo para la variable pública de la API del frontend. Se mantuvo el nombre ya existente, `VITE_API_URL` (`frontend/src/api/client.ts`, documentado en `docs/LOCAL_SETUP.md` desde antes de este bloque) — renombrar una variable ya en uso, sin ningún cambio de comportamiento asociado, solo agrega una migración innecesaria (`.env` locales existentes, `.env.example`, documentación) sin beneficio funcional. `docs/DEPLOYMENT.md` documenta explícitamente cargar `VITE_API_URL` (no `VITE_API_BASE_URL`) en Vercel.
+
+### Fallback a `localhost` solo en desarrollo, nunca en producción
+
+`frontend/src/api/client.ts` ahora distingue: si `VITE_API_URL` no está definida y `import.meta.env.DEV` es `true`, cae a `http://localhost:4000` (red de seguridad para no romper un `npm run dev` sin `.env` completo); si no está definida en un build de producción/preview, **lanza un error explícito** al cargar el módulo en vez de apuntar en silencio a `localhost` (que ahí siempre sería incorrecto y produciría fallos de red confusos en vez de un error claro de configuración).
+
+### `prisma generate` en `postinstall`, `prisma migrate deploy` encadenado al arranque
+
+Ver el detalle completo (con las alternativas consideradas) en `docs/DEPLOYMENT.md`, sección "Prisma en producción". Resumen de la decisión: `postinstall` (corre en cualquier `npm install`, local o en Render) para `generate`; `prisma:deploy` (`prisma migrate deploy`, nunca `migrate dev` ni `db push`) encadenado al **Start Command** de Render (`npm run prisma:deploy && npm start`) en vez de un paso de release separado — así ninguna versión nueva del backend puede levantar contra un schema desactualizado, sin depender de un paso manual adicional. Ningún script de este repo ejecuta un seed automáticamente.
+
+### `render.yaml`: punto de partida opcional, no la vía principal
+
+Se agregó un `render.yaml` mínimo en la raíz del repo (Blueprint de Render para el backend + la base Postgres, sin ningún secreto — las variables sensibles quedan `sync: false`) porque no cuesta nada tenerlo como referencia y no compromete ningún secreto. Pero la guía de despliegue (`docs/DEPLOYMENT.md`) documenta la configuración **manual** paso a paso como vía principal: es la que el propio enunciado de este bloque pidió detallar, y es más robusta ante cambios futuros en el formato exacto del Blueprint de Render (que no se verificó importándolo de verdad en esta sesión). `render.yaml` no incluye credenciales ni valores reales de ningún tipo.

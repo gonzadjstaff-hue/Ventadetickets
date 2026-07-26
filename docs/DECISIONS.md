@@ -108,3 +108,75 @@ El contador de reserva (`PendingOrderView`) calcula localmente si `expiresAt` ya
 ## `/check-in` cargado de forma diferida (`React.lazy`)
 
 `html5-qrcode` (el lector de cámara) es la dependencia más pesada del bundle del frontend y solo la usa la pantalla `/check-in` — una ruta MVP sin autenticación, no linkeada desde la navegación pública (ver `docs/ARCHITECTURE.md`). Se cambió el import estático de `CheckInPage` en `AppRouter.tsx` por `React.lazy` + `Suspense`, así el chunk que la incluye (`html5-qrcode` y el resto de `features/scanner/`) solo se descarga cuando alguien visita `/check-in`, nunca en la carga inicial de la landing pública. No cambia ningún comportamiento del scanner ni de sus tests (`CheckInPage.test.tsx` importa el componente directo, sin pasar por el router). Efecto medido: el chunk principal bajó de ~820 KB a ~445 KB (~250 KB a ~139 KB gzip) — detalle completo en `docs/PROGRESS.md`.
+
+## Integración de Mercado Pago Checkout Pro (modo prueba)
+
+Bloque que reemplaza progresivamente al simulador de pago (`modules/payments/simulationService.ts`, que sigue existiendo y disponible) por un recorrido de pago real para VIP, sin tocar precios, capacidad, `ticketsPerUnit` ni la reserva de 15 minutos. Fuentes oficiales consultadas (fecha de consulta: 2026-07-25): overview y creación de preferencia de Checkout Pro, referencia de la API de preferencias, notificaciones de pago y validación de firma en developers.mercadopago.com (dominio `.ar`, español e inglés), y el repositorio oficial `github.com/mercadopago/sdk-nodejs` (código fuente del SDK, para confirmar comportamiento no documentado en la web). No se usó memoria interna ni blogs de terceros para decisiones críticas (firma, idempotencia, estados).
+
+### SDK oficial (`mercadopago` npm) en vez de `fetch` a mano
+
+Se evaluaron ambas alternativas. Se eligió el SDK oficial (`mercadopago@3.2.1`, Node >=18, **cero dependencias de runtime propias** — confirmado en su `package.json`) por:
+
+- Tipado completo de request/response (coherente con el resto del proyecto, todo en TypeScript estricto).
+- Timeout configurable (`MercadoPagoConfig({ accessToken, options: { timeout } })`) — usa `fetch` nativo con `AbortController` internamente (confirmado leyendo `src/utils/restClient` del SDK), no una librería HTTP externa.
+- Trae su propio validador de firma (`WebhookSignatureValidator`), mantenido por Mercado Pago — reduce el riesgo de reimplementar mal el algoritmo HMAC a mano.
+- Repositorio con push reciente al momento de la consulta (activamente mantenido).
+
+No se mezcló SDK con `fetch` manual para lo mismo: **todas** las llamadas a Mercado Pago (crear/consultar preferencia, consultar pago, validar firma) pasan por el SDK, encapsulado en el único archivo que lo importa (`backend/src/integrations/payments/mercadoPago/mercadoPagoClient.ts`). El resto del backend solo conoce la interfaz interna `PaymentProvider` (`integrations/payments/types.ts`) — nunca un tipo crudo del SDK. `PreferenceRequest`/`PreferenceResponse`/`PaymentResponse` no se importan de una ruta interna del paquete (esos tipos no forman parte de su API pública, solo se exportan las clases) — se derivan con utility types de TypeScript a partir de la firma real de los métodos públicos (`Parameters`/`ReturnType`), para no depender de una ruta `dist/**` que podría cambiar de estructura sin ser un breaking change de cara afuera.
+
+### Bug real encontrado en el SDK instalado: `toleranceSeconds` del validador de firma
+
+Al escribir tests con vectores propios (`backend/tests/mercadoPagoSignature.test.ts`) reproduciendo el algoritmo documentado (`ts` en **segundos**, como lo manda Mercado Pago realmente), se detectó que `WebhookSignatureValidator.validate({..., toleranceSeconds })` de `mercadopago@3.2.1` compara ese `ts` contra `Date.now()` **sin convertir de segundos a milisegundos** (`src/utils/webhook/index.ts`, la resta se hace directo). Con `toleranceSeconds` seteado, esto rechaza como `TimestampOutOfTolerance` **cualquier** webhook real, por más que su firma sea genuinamente válida — hubiera roto la integración completa en producción si no se detecta acá. Se sacó `toleranceSeconds` del código (`mercadoPagoClient.ts`), documentado inline con la evidencia. Consecuencia: queda sin protección explícita contra repetición (replay) de una firma vieja — mitigado en parte por la deduplicación de `PaymentWebhookEvent` (una notificación repetida con la misma firma y el mismo `id` no se reprocesa). Pendiente: revisar cuando se actualice la dependencia.
+
+### `external_reference` = `Order.publicId`, directo
+
+Se usa el propio `Order.publicId` (cuid ya público en toda la API, no adivinable) como `external_reference` de la preferencia — sin derivar un identificador nuevo. Nunca email, nombre, ni un id interno predecible. Al procesar el webhook, la Order se busca directamente por `publicId = payment.external_reference` — no hace falta una tabla ni columna aparte para este mapeo.
+
+### `Order.providerPreferenceId`: única migración, reutilización explícita
+
+Se agregó una sola columna nueva (`Order.providerPreferenceId String?`, nullable, migración aditiva `add_order_provider_preference_id`) porque el modelo existente ya cubría todo lo demás: `Order.paymentProvider`/`externalReference` (ya declarados, sin usar hasta ahora), `Payment` (con `@@unique([provider, providerPaymentId])`, ya soporta el patrón `upsert`) y `PaymentWebhookEvent` (`@@unique([provider, externalEventId])`, `processed`, `processedAt`, `payload Json`, ya pensado para dedup) no necesitaron ningún cambio.
+
+Si `Order.providerPreferenceId` ya existe y la orden sigue `PENDING` sin vencer, **no se crea una preferencia nueva**: se hace un `GET` liviano contra Mercado Pago (`Preference.get`) para reobtener el `init_point`/`sandbox_init_point` (no cambian en la vida de una preferencia) y se devuelven esos mismos. Si Mercado Pago ya no la tiene (caso raro), se crea una nueva y se reemplaza. Además, cada creación usa una `idempotencyKey` determinística (`mp-preference-<orderPublicId>`, vía `requestOptions` del SDK) como defensa adicional ante un reintento de red del propio cliente HTTP.
+
+### `checkoutUrl` resuelto en el backend, nunca en el frontend
+
+La respuesta de `POST .../checkout/mercadopago` devuelve un único campo `checkoutUrl`, ya resuelto: `sandbox_init_point` si `MERCADOPAGO_ACCESS_TOKEN` es de prueba (`TEST-...`), `init_point` con credenciales productivas (`APP_USR-...`). El frontend nunca decide cuál usar ni arma la URL — solo redirige. El `access token` nunca se envía al frontend, ni siquiera indirectamente.
+
+### `back_urls` idénticas para success/pending/failure
+
+Las tres apuntan exactamente a la misma URL (`/checkout/return?orderPublicId=...`). Deliberado: si hubiera una URL por resultado, sería tentador que el frontend confiara en "por cuál volvió" para mostrar el resultado — justo lo que el enunciado prohíbe explícitamente. `CheckoutReturnPage` nunca lee ni un `status` ni ningún otro query param que Mercado Pago agregue a la redirección: la única fuente de verdad es `GET /orders/:orderPublicId`.
+
+### El webhook es la única fuente de verdad; el retorno del navegador nunca aprueba nada
+
+`POST /api/webhooks/mercadopago` es el único lugar que transiciona una `Order` a `PAID`. La pantalla de retorno (`CheckoutReturnPage`) solo hace polling de `GET /orders/:orderPublicId` hasta un estado terminal o un timeout — nunca escribe nada. Esto resuelve también el problema arquitectónico de la entrega: como el webhook puede llegar mientras el comprador todavía está en Mercado Pago (o después de que vuelva), los tokens crudos de los tickets nunca están disponibles en el frontend en ese momento. Solución adoptada (de las alternativas consideradas): el webhook, en el mismo procesamiento donde aprueba la orden y emite los tickets (con los tokens crudos todavía en memoria del proceso del backend), llama a `sendGeneralTicketEmail()` una vez por ticket — mismo servicio ya usado por General y por el simulador, sin rediseñar nada. La pantalla de retorno solo informa "Pago confirmado. Enviamos tus entradas por email." y **no** ofrece descarga ni muestra QR (no tiene, ni puede tener, los tokens). Si el email falla, el pago y los tickets siguen confirmados igual (try/catch alrededor del envío, ver más abajo) — reenvío/recuperación de tickets queda pendiente (ver `docs/ROADMAP.md`), y adjuntar el PDF al email tampoco es parte de este bloque.
+
+### Verificación server-to-server exhaustiva antes de aprobar
+
+El webhook nunca confía en el body de la notificación para status/amount/external_reference — siempre vuelve a pedir el pago completo (`GET /v1/payments/:id`) y valida, en este orden: existe una `Order` con `publicId = external_reference`; el importe coincide con `Order.total` (con una tolerancia de 0.01 para punto flotante, no para fraude); la moneda coincide; `live_mode` es coherente con el entorno (se deriva del prefijo del access token configurado — `APP_USR-` = producción, `TEST-` = prueba, convención documentada por Mercado Pago; no hace falta una variable nueva). Cualquier discrepancia se ignora (no aprueba, no crea `Payment`) pero **responde 200** — reintentar no va a hacer que un monto incorrecto de repente coincida, así que no tiene sentido que Mercado Pago siga reintentando esa notificación puntual.
+
+### Expiración perezosa aplicada también en el webhook
+
+Se detectó (y corrigió antes de cerrar el bloque, no llegó a quedar como bug) que sin este chequeo, un webhook `approved` que llegara después de que el `expiresAt` de la reserva ya pasó — pero antes de que cualquier otra cosa la marcara `EXPIRED` en la base — aprobaría la orden igual, porque el `updateMany` solo mira `status: "PENDING"`, no `expiresAt`. Se reutilizó `expireIfNeeded()` (`modules/orders/service.ts`, la misma función que ya usa el simulador) al principio de la transición del webhook: si la orden pasa a `EXPIRED` en esa misma llamada, ni `approved` ni `cancelled` la tocan después. Cubierto en `backend/tests/mercadoPagoWebhook.test.ts`.
+
+### Idempotencia en dos capas
+
+1. **`PaymentWebhookEvent`** (`@@unique([provider, externalEventId])`, usando el `id` de la notificación, no el `payment id`) — una notificación exactamente repetida (mismo `id`) se detecta antes de volver a golpear la API de Mercado Pago. Si el registro existe pero `processed: false` (un intento anterior murió a mitad de camino), se reintenta el procesamiento completo en vez de asumir que ya se hizo — nunca se "pierde" un pago por una carrera contra un crash previo.
+2. **`Payment`** (`@@unique([provider, providerPaymentId])`, `upsert`) + **`Order`** (`updateMany` condicionado por el estado actual) — aun si dos notificaciones *distintas* (`id` diferente) apuntan al mismo pago aprobado, o llegan en paralelo, solo una gana la transición `PENDING → PAID` y solo esa emite tickets. Mismo patrón ya usado por el simulador y por check-in.
+
+### Estados de pago: mapeo mínimo, sin inventar significados
+
+Se mapean únicamente los estados oficiales de un `Payment` de Mercado Pago: `approved`, `pending`, `in_process` (agrupado con `pending` — mismo significado práctico: sin decisión final), `authorized` (agrupado con `pending`), `rejected`, `cancelled`, `refunded` y `charged_back` (agrupado con `refunded`: el `PaymentStatus` interno no distingue devolución voluntaria de contracargo — simplificación documentada, no un olvido). `refunded`/`charged_back` solo tienen efecto si la `Order` ya estaba `PAID`: pasa a `REFUNDED` (valor que ya existía en el enum `OrderStatus`, no fue necesario agregarlo) y los `Ticket` todavía `ACTIVE` (no usados) quedan `REFUNDED`, bloqueando su check-in — los ya `USED` no se tocan, no se puede deshacer un ingreso ya ocurrido. Flujo de devolución/contracargo completo (dinero real, conciliación) queda fuera de este bloque — ver `docs/ROADMAP.md`.
+
+### Fallo de email no revierte nada
+
+El envío de email ocurre después de que la transacción de Prisma (Order → PAID, emisión de tickets) ya confirmó. Está envuelto en un `try/catch` silencioso adicional (`sendGeneralTicketEmail` en teoría nunca lanza — tiene su propio contrato de "no throw" — pero esto es una red de seguridad): un fallo ahí nunca convierte la respuesta del webhook en un 500 que le haga a Mercado Pago reintentar toda la notificación por un problema que reintentar no arregla (un proveedor de email caído no se arregla reintentando el webhook).
+
+### Modo sin credenciales: un único booleano derivado
+
+`env.MERCADOPAGO_CHECKOUT_AVAILABLE` (calculado una sola vez en `config/env.ts`, nunca releído en cada request) es `true` solo si `ENABLE_MERCADOPAGO_CHECKOUT=true` **y** están completos `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `APP_PUBLIC_URL` y `BACKEND_PUBLIC_URL`. Es el único lugar que decide esto — `app.ts` (monta o no las dos rutas) y el controller de creación de orden (agrega o no `mercadoPagoCheckoutAvailable` a la respuesta) lo consultan ahí, nunca recalculan la condición. Con cualquier variable faltante, el backend arranca igual (mismo criterio que el resto de integraciones opcionales — ver `emptyToUndefined` más arriba) y las rutas de checkout/webhook simplemente no se montan (404 estándar, como si no existieran — mismo patrón que `ENABLE_MVP_CHECKIN`/`ENABLE_MVP_PAYMENT_SIMULATOR`).
+
+`PAYMENT_PROVIDER` (`mock` | `mercadopago`) se agregó a `.env.example` porque el enunciado lo pedía, pero hoy es **solo informativo**: con un único proveedor real implementado, el gate funcional de verdad es `ENABLE_MERCADOPAGO_CHECKOUT`. Queda reservado para cuando exista más de un proveedor real y haga falta elegir entre ellos. `MERCADOPAGO_PUBLIC_KEY` también se declara sin usarse: Checkout Pro por redirección simple (`init_point`/`sandbox_init_point`) no necesita la public key ni `MercadoPago.js`/Bricks del lado del frontend — se reserva por si se agrega Checkout API/Bricks más adelante. `MERCADOPAGO_API_BASE_URL` se declara pero tampoco se conecta: el SDK oficial no expone una forma soportada de redirigir sus requests a otra base URL.
+
+### Sin persistencia insegura
+
+En ningún punto de este bloque se guarda un token crudo de ticket, el `access token`, el `webhook secret`, ni el payload completo de un pago (solo se persiste en `PaymentWebhookEvent.payload` el body ya validado por Zod del webhook, que de por sí no trae datos de tarjeta ni PII del comprador más allá de un `user_id` numérico propio de Mercado Pago — nunca el payload crudo sin filtrar). Nada se guarda en `localStorage`/`sessionStorage`/cookies/URL del lado del frontend.

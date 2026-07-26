@@ -4,13 +4,14 @@
 
 `frontend/` — React 19 + Vite + TypeScript + Tailwind CSS v4.
 
-- **`src/router/AppRouter.tsx`** — define las rutas con React Router: `/` → `PulseEventLanding`, y `/check-in` → `CheckInPage` (MVP de validación de QR, sin autenticación, no linkeada desde la navegación pública — ver más abajo). `CheckInPage` se carga con `React.lazy` + `Suspense`: arrastra `html5-qrcode` (la dependencia más pesada del bundle) y no tiene motivo para pagarse en la carga inicial de la landing pública (ver `docs/DECISIONS.md`).
+- **`src/router/AppRouter.tsx`** — define las rutas con React Router: `/` → `PulseEventLanding`, `/checkout/return` → `CheckoutReturnPage` (destino público de las back_urls de Checkout Pro, sin dependencias pesadas, no lazy) y `/check-in` → `CheckInPage` (MVP de validación de QR, sin autenticación, no linkeada desde la navegación pública — ver más abajo). `CheckInPage` se carga con `React.lazy` + `Suspense`: arrastra `html5-qrcode` (la dependencia más pesada del bundle) y no tiene motivo para pagarse en la carga inicial de la landing pública (ver `docs/DECISIONS.md`).
 - **`src/pages/PulseEventLanding.tsx`** — arma la landing pública del evento demo a partir de los componentes de `src/features/events/landing/`.
+- **`src/pages/CheckoutReturnPage.tsx`** — pantalla de retorno del checkout de Mercado Pago. Lee únicamente `orderPublicId` de la URL (nunca `status`/`payment_id`/`collection_status` ni ningún otro query param que Mercado Pago agregue a la redirección); hace polling de `GET /orders/:orderPublicId` hasta un estado terminal (`PAID`/`CANCELLED`/`EXPIRED`) o un tiempo máximo, sin depender de ningún token — la aprobación real siempre pasa por el webhook del backend, nunca por esta pantalla. Ver `docs/DECISIONS.md`.
 - **`src/features/events/landing/`** — todos los componentes visuales de la landing (Hero, TicketTypes, HowItWorks, etc.), datos mockeados (`mockData.ts`), y los componentes conectados a datos reales: `GeneralRegistrationModal.tsx` (registro gratuito), `EventTicket.tsx`/`TicketQrCode.tsx` (entrada descargable con QR real, reutilizada también para tickets VIP). `EventTicket` es puramente presentación + captura: no tiene botón propio, expone `generateCapture()` (vía `forwardRef`) para que un padre arme el PDF de descarga/compartir sin que el componente dispare nada por sí solo — ver `ticketExport/` más abajo.
 - **`src/features/events/ticketExport/`** — arquitectura compartida de descarga/compartir en PDF, reutilizada por General, VIP Individual y VIP Doble (ver `docs/DECISIONS.md`): `ticketPdf.ts` (arma el PDF con `jsPDF`, `import()` dinámico), `share.ts` (wrapper de la Web Share API nativa), `downloadBlob.ts`, `useTicketPdfDelivery.ts` (hook que junta generación + descarga/compartir) y `TicketDeliveryButtons.tsx` (los botones, reutilizados tal cual).
-- **`src/features/events/checkout/`** — flujo de compra VIP simulada: `VipCheckoutModal.tsx` (pasos comprador → asistentes → resumen → pago simulado → resultado, React Hook Form + Zod), `vipCheckoutSchema.ts`, `SimulatePaymentControls.tsx` (los 4 botones de simulación, solo visibles en `import.meta.env.DEV` y si el backend habilita `paymentSimulationAvailable`).
+- **`src/features/events/checkout/`** — flujo de compra VIP: `VipCheckoutModal.tsx` (pasos comprador → asistentes → resumen → pago → resultado, React Hook Form + Zod). En el paso de pago, si el backend informa `mercadoPagoCheckoutAvailable`, aparece el botón real "Pagar con Mercado Pago" (pide la preferencia y redirige a `checkoutUrl`); el simulador (`SimulatePaymentControls.tsx`, los 4 botones de simulación) solo aparece además en `import.meta.env.DEV` con `paymentSimulationAvailable`, y queda visualmente separado bajo la etiqueta "Herramientas de prueba" para no confundirse con el botón real.
 - **`src/features/scanner/`** — `QrScanner.tsx` (lector de cámara sobre `html5-qrcode`, inicio/detención manual), `ManualQrInput.tsx` (carga manual solo en desarrollo), `CheckInResultPanel.tsx` — usados por `CheckInPage`.
-- **`src/api/`** — capa de acceso HTTP. `client.ts` centraliza `fetch` + manejo de errores (`ApiError`) leyendo `VITE_API_URL` una sola vez. `registrations.ts` (registro General), `checkIns.ts` (validación de QR), `orders.ts` (creación/consulta de orden VIP y simulación de pago).
+- **`src/api/`** — capa de acceso HTTP. `client.ts` centraliza `fetch` + manejo de errores (`ApiError`) leyendo `VITE_API_URL` una sola vez. `registrations.ts` (registro General), `checkIns.ts` (validación de QR), `orders.ts` (creación/consulta de orden VIP, simulación de pago, y `createMercadoPagoCheckout` para pedir la preferencia de Checkout Pro).
 - **`src/config/demoEvent.ts`** — lee de variables de entorno los IDs del evento y tipos de entrada demo (General, VIP Individual, VIP Doble). Es el único lugar del frontend que conoce esos IDs; existe porque todavía no hay un endpoint de listado de eventos/tipos de entrada (ver `docs/DECISIONS.md`).
 - **Estado del servidor**: `@tanstack/react-query` (`QueryClientProvider` montado en `src/main.tsx`), usado por las mutaciones de registro General, creación de orden VIP y simulación de pago.
 - **Estilos**: Tailwind para estructura y layout; `pulse-landing.css` (dentro de `features/events/landing/`) para animaciones, gradientes y estados hover específicos de esa landing. Paleta y tipografía (Google Fonts "Kanit") están scopeadas a la clase `.pulse-landing` — cualquier componente que use esas clases (ej. `pulse-btn-primary`) necesita tener un ancestro con esa clase, si no el fondo/color queda indefinido (pasó una vez con `CheckInPage`, ver commit de esa pantalla).
@@ -19,7 +20,7 @@
 
 `backend/` — Node.js + Express 5 + TypeScript + Prisma.
 
-- **`src/app.ts`** — arma la app Express: `helmet`, `cors` (restringido a `FRONTEND_URL`), rate limiting, `express.json()`, el endpoint `GET /api/health`, y los routers de cada módulo montados en `/api/events` (`registrations`, `orders`) o `/api/dev` (`payments`, simulador). Los routers de MVP temporales (`check-in`, simulador de pago) solo se montan si su variable de entorno correspondiente está en `"true"` — si no, Express responde 404 estándar para esas rutas, como si no existieran.
+- **`src/app.ts`** — arma la app Express: `helmet`, `cors` (restringido a `FRONTEND_URL`), rate limiting, `express.json()`, el endpoint `GET /api/health`, y los routers de cada módulo montados en `/api/events` (`registrations`, `orders`, checkout de Mercado Pago) o `/api/dev` (`payments`, simulador) o en la raíz de `/api` (webhook de Mercado Pago). Los routers de MVP temporales (`check-in`, simulador de pago) y los de Mercado Pago (checkout + webhook) solo se montan si su variable de entorno correspondiente está efectivamente disponible — si no, Express responde 404 estándar para esas rutas, como si no existieran.
 - **`src/config/env.ts`** — valida las variables de entorno con Zod al arrancar. Trata strings vacíos (placeholders de `.env.example` sin completar) como si la variable no estuviera definida, para que el backend pueda arrancar igual con integraciones opcionales sin configurar.
 - **`src/shared/`**:
   - `prisma.ts` — instancia única de `PrismaClient`.
@@ -27,13 +28,13 @@
   - `qrToken.ts` — genera el token aleatorio del ticket, su hash SHA-256, y parsea/valida el payload de un QR escaneado (`crypto` nativo de Node, sin dependencias nuevas). Usado tanto por el registro General/VIP (generación) como por check-in (parseo).
 - **`src/middlewares/errorHandler.ts`** — único middleware de error de la app. Traduce `AppError` a su `statusCode`, errores de `ZodError` a 400 con detalle por campo, y cualquier otra excepción a 500 genérico (sin loguear el body de la request, que puede tener email/teléfono).
 - **`src/integrations/email/`** — envío del ticket con QR por email (`emailService.ts` orquesta, `template.ts` arma el HTML con el QR como PNG adjunto inline por CID, `resendProvider.ts`/`consoleProvider.ts` son los dos proveedores). Usado tanto por el registro General como por la aprobación de pago VIP.
-- **`src/modules/`** — un módulo por caso de uso, siguiendo `controller → service → routes` (sin capa de `repository` separada cuando toda la lógica es una única transacción). Con código hoy: **`registrations/`** (General), **`check-in/`** (validación de QR, MVP sin auth), **`orders/`** (creación y consulta de orden VIP, cálculo de capacidad) y **`payments/`** (simulador de pago y emisión de tickets). El resto (`auth`, `events`, `ticket-types`, `tickets`, `admin`, `users`) son carpetas vacías reservadas para las próximas fases (ver `project.md`).
+- **`src/modules/`** — un módulo por caso de uso, siguiendo `controller → service → routes` (sin capa de `repository` separada cuando toda la lógica es una única transacción). Con código hoy: **`registrations/`** (General), **`check-in/`** (validación de QR, MVP sin auth), **`orders/`** (creación y consulta de orden VIP, cálculo de capacidad) y **`payments/`** (simulador de pago, emisión de tickets, y ahora también Checkout Pro/webhook de Mercado Pago: `mercadoPagoCheckoutService.ts`, `mercadoPagoWebhookService.ts`, `mercadoPagoController.ts`, `mercadoPagoRoutes.ts`, `mercadoPagoWebhookRoutes.ts`, `mercadoPagoErrors.ts`). El resto (`auth`, `events`, `ticket-types`, `tickets`, `admin`, `users`) son carpetas vacías reservadas para las próximas fases (ver `project.md`).
 
 ## PostgreSQL y Prisma
 
 - Postgres 16 corriendo en Docker en desarrollo (contenedor `tickets-db`, base `tickets_db`), ver `docs/LOCAL_SETUP.md`.
 - `backend/prisma/schema.prisma` es la única fuente de verdad del modelo de datos — detalle completo en `docs/DATA_MODEL.md`.
-- Migraciones versionadas en `backend/prisma/migrations/`. Hasta ahora: `init` (esquema inicial), `make_firebase_uid_optional` (`User.firebaseUid` opcional) y `add_order_item_attendee_names` (`OrderItem.attendeeNames Json?`, para la compra VIP — ver `docs/DECISIONS.md`).
+- Migraciones versionadas en `backend/prisma/migrations/`. Hasta ahora: `init` (esquema inicial), `make_firebase_uid_optional` (`User.firebaseUid` opcional), `add_order_item_attendee_names` (`OrderItem.attendeeNames Json?`, para la compra VIP) y `add_order_provider_preference_id` (`Order.providerPreferenceId String?`, nullable, para reutilizar la preferencia de Checkout Pro de Mercado Pago — ver `docs/DECISIONS.md`).
 - `backend/prisma/seed.ts` — seed de desarrollo idempotente (usa `upsert` con IDs fijos), crea un evento demo publicado y sus 3 tipos de entrada. No se ejecuta automáticamente; se corre a mano con `npm run db:seed`.
 
 ## Flujo de registro General
@@ -63,7 +64,7 @@ Todo el registro (User + Order + OrderItem + Ticket) se crea o no se crea comple
 
 ## Flujo de compra VIP simulada (Individual y Doble)
 
-Sin Mercado Pago real todavía (el pago se simula, ver `docs/DECISIONS.md`). Tres pasos separados, cada uno su propio endpoint (detalle completo en `docs/API.md`):
+El simulador de pago sigue disponible como herramienta de desarrollo/tests, en paralelo al Checkout Pro de Mercado Pago real (ver la sección dedicada más abajo, "Flujo de compra VIP con Mercado Pago"). Tres pasos separados, cada uno su propio endpoint (detalle completo en `docs/API.md`):
 
 ```
 1. Crear orden — POST /api/events/:eventPublicId/orders/vip
@@ -93,6 +94,55 @@ Sin Mercado Pago real todavía (el pago se simula, ver `docs/DECISIONS.md`). Tre
 
 Igual que en General: los tickets nunca se emiten mientras la orden esté `PENDING`, el token crudo solo existe en la respuesta inmediata de la primera aprobación, y solo se persiste su hash.
 
+## Flujo de compra VIP con Mercado Pago (Checkout Pro, modo prueba)
+
+Recorrido de pago real, alternativo al simulador de arriba (que sigue disponible). Reutiliza la misma creación de orden (`POST /orders/vip`) — lo que cambia es cómo se aprueba el pago. Detalle completo de diseño en `docs/DECISIONS.md`, endpoints en `docs/API.md`.
+
+```
+1. Frontend (VipCheckoutModal, orden ya PENDING): botón "Pagar con Mercado Pago"
+   → POST /api/events/:eventPublicId/orders/:orderPublicId/checkout/mercadopago (sin body)
+
+2. Backend (modules/payments/mercadoPagoCheckoutService.ts):
+     - valida que la orden exista, sea de ese evento, y siga PENDING (aplica
+       expiración perezosa; rechaza CANCELLED/EXPIRED/ya PAID)
+     - arma la preferencia con datos de la BASE (nunca del frontend): importe,
+       moneda, external_reference = orderPublicId, back_urls (las 3 iguales,
+       apuntando a /checkout/return?orderPublicId=...), notification_url
+     - crea la preferencia en Mercado Pago (o reutiliza la existente si ya
+       hay una vigente para esa orden) y persiste providerPreferenceId
+     - responde con checkoutUrl ya resuelto (sandbox en modo prueba)
+
+3. Frontend: redirige el navegador a checkoutUrl (Mercado Pago)
+4. El comprador paga en el entorno de Mercado Pago
+5. Mercado Pago redirige de vuelta a /checkout/return?orderPublicId=...
+   (mismo destino sin importar el resultado — nunca se confía en query params
+   de retorno para aprobar nada)
+6. Frontend (CheckoutReturnPage): polling de GET /orders/:orderPublicId hasta
+   PAID/CANCELLED/EXPIRED o timeout
+
+--- en paralelo, server-to-server ---
+
+7. Mercado Pago llama a POST /api/webhooks/mercadopago
+8. Backend (modules/payments/mercadoPagoWebhookService.ts):
+     - valida x-signature (HMAC-SHA256, comparación timing-safe) — firma
+       inválida: 401, nunca consulta nada
+     - dedup por PaymentWebhookEvent (provider + id de la notificación)
+     - consulta el pago real: GET /v1/payments/:id (nunca confía en el body
+       del webhook para status/amount/external_reference)
+     - verifica: existe una Order con publicId = external_reference, importe
+       y moneda coinciden, live_mode coherente con las credenciales
+       configuradas — cualquier discrepancia se ignora sin aprobar nada
+     - approved: aplica expiración perezosa primero (una orden ya vencida no
+       se aprueba), transición PENDING → PAID guardada por updateMany, emite
+       tickets (mismo emitTicketsForOrderItem que el simulador), envía el
+       email con los tokens crudos en memoria de ese mismo request
+     - pending/rejected: Order sigue PENDING; cancelled: Order → CANCELLED;
+       refunded/charged_back: si la Order ya estaba PAID, pasa a REFUNDED y
+       los tickets ACTIVE quedan REFUNDED (bloqueando su check-in)
+```
+
+Idempotente en dos niveles: `PaymentWebhookEvent` evita reprocesar la misma notificación, y `Payment`/`Order` usan `upsert`/`updateMany` condicionado — ni una notificación repetida ni dos concurrentes duplican tickets.
+
 ## Transacción Serializable
 
 La transacción de `registerGeneralTicket()` (`backend/src/modules/registrations/service.ts`) corre con `isolationLevel: Serializable` de Postgres. Es necesario porque dos requests simultáneas con el mismo email (o compitiendo por el último cupo) podrían pasar ambas el chequeo de "no existe todavía" si se leyera con el nivel de aislamiento por defecto.
@@ -113,8 +163,8 @@ Los tests de integración del backend corren contra una base Postgres **distinta
 
 ## Integraciones
 
-- **Email** (`integrations/email/`) — implementado. Confirmación de compra y envío del ticket con QR (PNG generado con `qrcode`, adjunto inline por CID vía Resend, o simulado en consola en desarrollo). El token crudo llega a este servicio en el mismo momento de la emisión del ticket (General o VIP), nunca después.
+- **Email** (`integrations/email/`) — implementado. Confirmación de compra y envío del ticket con QR (PNG generado con `qrcode`, adjunto inline por CID vía Resend, o simulado en consola en desarrollo). El token crudo llega a este servicio en el mismo momento de la emisión del ticket (General, VIP simulado o VIP con Mercado Pago), nunca después.
 - **Firebase** (`integrations/firebase/`, carpeta reservada, vacía) — todavía no implementado. Autenticación, solo para administradores y validadores (no para asistentes que compran/registran entradas).
-- **Mercado Pago** (`integrations/mercadopago/`, carpeta reservada, vacía) — todavía no implementado. Va a reemplazar al simulador de pago (`modules/payments/`) como fuente real de aprobación/rechazo, sin cambiar el resto del flujo (creación de orden, emisión de tickets, email).
+- **Mercado Pago** (`integrations/payments/`, con `integrations/payments/mercadoPago/`) — implementado como recorrido de pago real para VIP (Checkout Pro, modo prueba), coexistiendo con el simulador de `modules/payments/`. `integrations/payments/types.ts` define la interfaz interna `PaymentProvider` (crear preferencia, consultar pago, verificar firma) — el resto del sistema nunca conoce una estructura cruda de Mercado Pago. `mercadoPago/mercadoPagoClient.ts` es el único archivo que importa el SDK oficial (`mercadopago` npm, ver `docs/DECISIONS.md`); `mercadoPago/mercadoPagoProvider.ts` implementa la interfaz y normaliza estados/errores; `paymentProviderRegistry.ts` decide si está disponible (`env.MERCADOPAGO_CHECKOUT_AVAILABLE`). Consumido por `modules/payments/mercadoPagoCheckoutService.ts` (crear/reutilizar preferencia) y `mercadoPagoWebhookService.ts` (webhook idempotente: verifica firma, consulta el pago server-to-server, y solo `approved` emite tickets). Ver `docs/API.md` para los endpoints.
 - **WhatsApp** — notificaciones/recordatorios, no implementado ni tiene carpeta reservada todavía.
 - **CRM** y **Meta Pixel** — no implementados.

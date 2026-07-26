@@ -20,9 +20,9 @@ App Venta Tickets Automatizada/
 │       ├── api/                        cliente HTTP, llamadas al backend
 │       ├── config/                     IDs de datos demo (env)
 │       ├── features/events/landing/    landing "Pulse Event", registro General, entrada descargable
-│       ├── features/events/checkout/   checkout VIP (comprador, asistentes, resumen, pago simulado)
+│       ├── features/events/checkout/   checkout VIP (comprador, asistentes, resumen, pago simulado o Mercado Pago)
 │       ├── features/scanner/           lector de QR y pantalla de check-in
-│       ├── pages/                      páginas (PulseEventLanding, CheckInPage)
+│       ├── pages/                      páginas (PulseEventLanding, CheckoutReturnPage, CheckInPage)
 │       └── router/                     React Router (AppRouter)
 ├── backend/           Node.js + Express + TypeScript + Prisma
 │   ├── prisma/
@@ -33,8 +33,9 @@ App Venta Tickets Automatizada/
 │       ├── modules/registrations/      registro General (gratuita)
 │       ├── modules/check-in/           validación de QR (MVP sin autenticación)
 │       ├── modules/orders/             creación y consulta de orden VIP, reserva de capacidad
-│       ├── modules/payments/           simulador de pago (solo dev/tests) y emisión de tickets
+│       ├── modules/payments/           simulador de pago (solo dev/tests), Checkout Pro/webhook de Mercado Pago, y emisión de tickets
 │       ├── integrations/email/         envío del ticket por email (Resend o consola de desarrollo)
+│       ├── integrations/payments/      proveedor de pago abstraído; mercadoPago/ es el único que importa el SDK oficial
 │       ├── middlewares/errorHandler.ts
 │       ├── shared/                     prisma client, AppError, generación/parseo de token de QR
 │       └── config/env.ts
@@ -104,15 +105,15 @@ Los tests del backend corren contra una base de datos separada de la de desarrol
 
 ## Estado actual
 
-Implementado: la landing pública del evento demo, el **registro gratuito de entrada General**, **QR real** con entrada descargable, **envío por email** (General y VIP), **validación de acceso por QR** (check-in, MVP sin autenticación) y la **venta de entradas VIP Individual y VIP Doble con pago simulado** (sin Mercado Pago real todavía). Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
+Implementado: la landing pública del evento demo, el **registro gratuito de entrada General**, **QR real** con entrada descargable, **envío por email** (General y VIP), **validación de acceso por QR** (check-in, MVP sin autenticación), la **venta de entradas VIP Individual y VIP Doble** (con pago simulado o con **Checkout Pro de Mercado Pago en modo prueba**) y la **descarga/compartir de entradas en PDF**. Detalle en [`docs/PROGRESS.md`](./docs/PROGRESS.md).
 
-El registro General, el check-in y la venta VIP (Individual y Doble) están probados de punta a punta contra navegador real, además de la suite automatizada (94 tests backend + 116 tests frontend). La descarga/compartir de entradas en PDF y el resto de la auditoría del checkout (ver [`docs/PROGRESS.md`](./docs/PROGRESS.md)) todavía **no** tuvieron prueba manual en navegador — solo automatizada.
+El registro General, el check-in y la venta VIP (Individual y Doble) están probados de punta a punta contra navegador real, además de la suite automatizada (**148 tests backend + 133 tests frontend**). La descarga/compartir de entradas en PDF y el checkout de Mercado Pago (ver [`docs/PROGRESS.md`](./docs/PROGRESS.md)) todavía **no** tuvieron prueba manual en navegador — solo automatizada; Mercado Pago además necesita credenciales de prueba reales y una URL pública, ver [`docs/LOCAL_SETUP.md`](./docs/LOCAL_SETUP.md).
 
-Todavía **no** hay autenticación, Mercado Pago real, WhatsApp, CRM, panel administrativo, reportes ni deploy.
+Todavía **no** hay credenciales productivas de Mercado Pago, autenticación, WhatsApp, CRM, panel administrativo, reportes ni deploy.
 
 ## Funcionalidades pendientes
 
-Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: Mercado Pago real → cron de expiración de órdenes → WhatsApp → CRM → administración y reportes → deploy.
+Ver [`docs/ROADMAP.md`](./docs/ROADMAP.md) para el orden sugerido. Resumen: validar Mercado Pago manualmente con credenciales de prueba → cron de expiración de órdenes → WhatsApp → CRM → administración y reportes → deploy.
 
 ## Documentación
 

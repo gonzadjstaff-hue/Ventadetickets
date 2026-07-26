@@ -23,6 +23,8 @@ export interface CreateVipOrderResponse {
   status: "PENDING";
   /** Solo viene presente cuando el backend tiene el simulador de pago habilitado (desarrollo). */
   paymentSimulationAvailable?: boolean;
+  /** Solo viene presente cuando Mercado Pago está efectivamente disponible (flag + credenciales) en el backend. */
+  mercadoPagoCheckoutAvailable?: boolean;
 }
 
 export interface OrderStatusResponse {
@@ -55,6 +57,14 @@ export interface SimulatePaymentResponse {
   tickets?: SimulatedTicket[];
 }
 
+export interface MercadoPagoCheckoutResponse {
+  preferenceId: string;
+  /** URL de redirección ya resuelta del lado del backend (sandbox en modo prueba). Nunca se arma acá. */
+  checkoutUrl: string;
+  orderPublicId: string;
+  expiresAt: string | null;
+}
+
 export function createVipOrder(eventPublicId: string, payload: CreateVipOrderPayload): Promise<CreateVipOrderResponse> {
   return apiFetch<CreateVipOrderResponse>(`/api/events/${eventPublicId}/orders/vip`, {
     method: "POST",
@@ -71,5 +81,12 @@ export function simulatePayment(orderPublicId: string, result: SimulatedPaymentR
   return apiFetch<SimulatePaymentResponse>(`/api/dev/orders/${orderPublicId}/simulate-payment`, {
     method: "POST",
     body: JSON.stringify({ result }),
+  });
+}
+
+/** Solo funciona si el backend tiene Mercado Pago efectivamente disponible (ver `mercadoPagoCheckoutAvailable` en CreateVipOrderResponse). */
+export function createMercadoPagoCheckout(eventPublicId: string, orderPublicId: string): Promise<MercadoPagoCheckoutResponse> {
+  return apiFetch<MercadoPagoCheckoutResponse>(`/api/events/${eventPublicId}/orders/${orderPublicId}/checkout/mercadopago`, {
+    method: "POST",
   });
 }

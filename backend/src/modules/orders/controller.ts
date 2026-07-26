@@ -26,6 +26,9 @@ export async function createVipOrderController(
       // Presente solo cuando el simulador realmente está montado (ver app.ts):
       // así el frontend nunca ofrece controles de simulación que no van a funcionar.
       ...(env.ENABLE_MVP_PAYMENT_SIMULATOR ? { paymentSimulationAvailable: true } : {}),
+      // Mismo criterio que arriba, para Mercado Pago: solo aparece si las
+      // rutas de checkout/webhook están efectivamente montadas.
+      ...(env.MERCADOPAGO_CHECKOUT_AVAILABLE ? { mercadoPagoCheckoutAvailable: true } : {}),
     });
   } catch (error) {
     next(error);

@@ -151,9 +151,9 @@ Cualquier otro error no controlado devuelve 500 con `{ "error": { "code": "INTER
 
 ---
 
-## Venta VIP simulada (Individual y Doble)
+## Venta VIP (Individual y Doble)
 
-**Sin Mercado Pago real todavía** — el pago se simula con un endpoint de desarrollo (más abajo). Implementado en `backend/src/modules/orders/` (creación y consulta de orden) y `backend/src/modules/payments/` (simulador de pago). Detalle de las decisiones de diseño en `docs/DECISIONS.md`.
+Creación y consulta de orden implementadas en `backend/src/modules/orders/`. El pago se puede confirmar de dos formas: con un **simulador de pago** (endpoint de desarrollo, más abajo) o con **Checkout Pro de Mercado Pago en modo prueba** (ver la sección dedicada más abajo) — ambos coexisten. Detalle de las decisiones de diseño en `docs/DECISIONS.md`.
 
 ### `POST /api/events/:eventPublicId/orders/vip`
 
@@ -184,11 +184,12 @@ Crea una orden `PENDING` que reserva una unidad de un `TicketType` VIP (`price >
   "buyer": { "name": "Ada Lovelace", "email": "ada@example.com", "whatsapp": "+5491122334455" },
   "attendees": ["Ada Lovelace"],
   "status": "PENDING",
-  "paymentSimulationAvailable": true
+  "paymentSimulationAvailable": true,
+  "mercadoPagoCheckoutAvailable": true
 }
 ```
 
-`paymentSimulationAvailable` solo aparece (y solo puede ser `true`) cuando el backend tiene `ENABLE_MVP_PAYMENT_SIMULATOR=true`. No se expone ningún id interno, hash ni token.
+`paymentSimulationAvailable` solo aparece (y solo puede ser `true`) cuando el backend tiene `ENABLE_MVP_PAYMENT_SIMULATOR=true`. `mercadoPagoCheckoutAvailable` solo aparece (y solo puede ser `true`) cuando Checkout Pro de Mercado Pago está efectivamente disponible — ver `docs/DECISIONS.md` y la sección de Mercado Pago más abajo. No se expone ningún id interno, hash ni token.
 
 **Errores**
 
@@ -268,3 +269,60 @@ Consulta el estado de una orden (VIP o, en principio, cualquier otra). Si estaba
 - Si la orden ya venció, la respuesta refleja `orderStatus: "EXPIRED"` con `alreadyProcessed: true`, sin aprobar nada.
 
 **Errores:** `400 VALIDATION_ERROR` (valor de `result` inválido), `404 ORDER_NOT_FOUND`.
+
+---
+
+## Checkout Pro de Mercado Pago (modo prueba)
+
+Recorrido de pago real para VIP, alternativo al simulador de arriba (que sigue disponible). Implementado en `backend/src/modules/payments/` (`mercadoPagoCheckoutService.ts`, `mercadoPagoWebhookService.ts`, `mercadoPagoController.ts`) y `backend/src/integrations/payments/`. Detalle de diseño en `docs/DECISIONS.md`.
+
+Ambos endpoints de esta sección **solo existen** si `env.MERCADOPAGO_CHECKOUT_AVAILABLE` es `true` (flag `ENABLE_MERCADOPAGO_CHECKOUT=true` **y** credenciales/URLs completas — ver `docs/LOCAL_SETUP.md`). Si no, responden 404 estándar de Express, como si no existieran (mismo patrón que los MVP de arriba).
+
+### `POST /api/events/:eventPublicId/orders/:orderPublicId/checkout/mercadopago`
+
+Crea (o reutiliza) una preferencia de Checkout Pro para una orden VIP ya creada y todavía `PENDING`. No requiere body: el importe, la moneda y el título se toman siempre de la base, nunca de lo que mande el frontend.
+
+**Respuesta 201**
+
+```json
+{
+  "preferenceId": "1234567-abcd-...",
+  "checkoutUrl": "https://sandbox.mercadopago.com/checkout/v1/redirect?pref_id=...",
+  "orderPublicId": "ckor2x9c40003uud8vv9ej3dx",
+  "expiresAt": "2026-07-24T21:15:00.000Z"
+}
+```
+
+`checkoutUrl` ya viene resuelto del lado del backend: es `sandbox_init_point` cuando `MERCADOPAGO_ACCESS_TOKEN` es de prueba (`TEST-...`), o `init_point` con credenciales productivas. El frontend solo tiene que redirigir ahí — nunca arma esta URL por su cuenta, y nunca recibe el access token.
+
+Si la orden ya tiene una preferencia creada (mismo `orderPublicId`, sigue `PENDING` y no venció), se reutiliza (un `GET` liviano contra Mercado Pago) en vez de crear una nueva — ver `docs/DECISIONS.md`.
+
+**Errores**
+
+| Status | `code` | Motivo |
+|---|---|---|
+| 404 | `EVENT_NOT_FOUND` / `ORDER_NOT_FOUND` | Mismo criterio que el resto de la API (no distingue "no existe" de "es de otro evento"). |
+| 400 | `ORDER_CANCELLED` | La orden fue cancelada. |
+| 409 | `ORDER_EXPIRED` | La reserva venció (aplica expiración perezosa antes de responder). |
+| 409 | `ORDER_ALREADY_PAID` | La orden ya está `PAID`: no se crea otra preferencia. |
+| 503 | `MERCADOPAGO_CHECKOUT_UNAVAILABLE` | No debería poder pasar (la ruta no se monta si está deshabilitado) — red de seguridad. |
+| 502 / 504 | `MERCADOPAGO_PROVIDER_ERROR` | Falla al comunicarse con Mercado Pago (timeout, 401/403/404/429/5xx, payload inesperado). Nunca expone el error crudo del proveedor. |
+
+### `POST /api/webhooks/mercadopago`
+
+Endpoint público (sin autenticación de usuario) al que Mercado Pago llama server-to-server para notificar cambios de estado de un pago. La autenticidad se valida por firma (`x-signature`/`x-request-id`), nunca por sesión.
+
+**Nunca confía en el body de la notificación para nada**: valida la firma, extrae el `payment id` (`data.id`, de la query string o del body), y vuelve a consultar el pago completo directamente a la API de Mercado Pago (`GET /v1/payments/:id`) antes de tocar cualquier dato. Verifica que el pago corresponda a una `Order` existente (`external_reference` = `Order.publicId`), que el importe y la moneda coincidan exactamente, y que `live_mode` sea coherente con el entorno configurado — cualquier discrepancia se ignora sin aprobar nada (pero responde 200, para no generar reintentos eternos de algo que nunca va a coincidir).
+
+Solo un pago `approved` marca la `Order` `PAID` y emite los tickets (mismo mecanismo de `updateMany` condicionado por `status: "PENDING"` que usa el simulador, más la expiración perezosa aplicada antes de aprobar). El email con el ticket se envía inmediatamente después, con los tokens crudos todavía en memoria de ese mismo request — nunca se persisten ni se vuelven a pedir.
+
+**Respuesta 200** — `{ "received": true }` (siempre que la firma sea válida, aunque el pago se haya ignorado por algún mismatch).
+
+**Errores**
+
+| Status | `code` | Motivo |
+|---|---|---|
+| 401 | `INVALID_WEBHOOK_SIGNATURE` | Firma ausente, malformada o que no coincide. Nunca consulta el pago en este caso. |
+| 502 / 504 | `MERCADOPAGO_PROVIDER_ERROR` | Falla al consultar el pago server-to-server. Mercado Pago reintenta la notificación (cada ~15 min) ante cualquier respuesta que no sea 200/201. |
+
+Idempotente en dos niveles: `PaymentWebhookEvent` (deduplicación por `provider` + el `id` de la notificación) evita reprocesar una notificación ya completada, y el `Payment`/`Order` subyacentes usan `upsert`/`updateMany` condicionado — ni una notificación repetida ni dos notificaciones concurrentes para el mismo pago duplican tickets.

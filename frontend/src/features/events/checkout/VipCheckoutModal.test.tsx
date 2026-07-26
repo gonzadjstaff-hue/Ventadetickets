@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
 import {
+  createMercadoPagoCheckout,
   createVipOrder,
   getOrderStatus,
   simulatePayment,
@@ -15,6 +16,7 @@ import {
 import VipCheckoutModal from "./VipCheckoutModal";
 
 vi.mock("../../../api/orders", () => ({
+  createMercadoPagoCheckout: vi.fn(),
   createVipOrder: vi.fn(),
   getOrderStatus: vi.fn(),
   simulatePayment: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock("html-to-image", () => ({ toPng: mockedToPng }));
 const mockedCreateVipOrder = vi.mocked(createVipOrder);
 const mockedGetOrderStatus = vi.mocked(getOrderStatus);
 const mockedSimulatePayment = vi.mocked(simulatePayment);
+const mockedCreateMercadoPagoCheckout = vi.mocked(createMercadoPagoCheckout);
 
 function renderModal(overrides: Partial<Parameters<typeof VipCheckoutModal>[0]> = {}) {
   const onClose = vi.fn();
@@ -84,6 +87,7 @@ describe("VipCheckoutModal", () => {
     mockedCreateVipOrder.mockReset();
     mockedGetOrderStatus.mockReset();
     mockedSimulatePayment.mockReset();
+    mockedCreateMercadoPagoCheckout.mockReset();
     mockedToDataURL.mockReset();
     mockedToDataURL.mockResolvedValue("data:image/png;base64,FAKE");
     mockedToPng.mockReset();
@@ -198,8 +202,12 @@ describe("VipCheckoutModal", () => {
     expect(await screen.findByText(/ya no quedan unidades disponibles/i)).toBeInTheDocument();
   });
 
-  async function createPendingOrderInUi(user: ReturnType<typeof userEvent.setup>, attendees: string[] = ["Ada Lovelace"]) {
-    mockedCreateVipOrder.mockResolvedValue(pendingOrder);
+  async function createPendingOrderInUi(
+    user: ReturnType<typeof userEvent.setup>,
+    attendees: string[] = ["Ada Lovelace"],
+    order: CreateVipOrderResponse = pendingOrder,
+  ) {
+    mockedCreateVipOrder.mockResolvedValue(order);
     await fillBuyerStep(user);
     await fillAttendeesStep(user, attendees);
     await user.click(screen.getByRole("button", { name: /confirmar reserva/i }));
@@ -376,6 +384,109 @@ describe("VipCheckoutModal", () => {
 
     expect(setItemSpy).not.toHaveBeenCalled();
     setItemSpy.mockRestore();
+  });
+
+  describe("Pagar con Mercado Pago", () => {
+    const mercadoPagoOrder: CreateVipOrderResponse = { ...pendingOrder, mercadoPagoCheckoutAvailable: true };
+
+    function stubLocation() {
+      const original = window.location;
+      const mockLocation = { ...original, href: "" };
+      Object.defineProperty(window, "location", { value: mockLocation, writable: true, configurable: true });
+      return () => {
+        Object.defineProperty(window, "location", { value: original, writable: true, configurable: true });
+      };
+    }
+
+    it("solo se muestra si el backend informa mercadoPagoCheckoutAvailable", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user, ["Ada Lovelace"], mercadoPagoOrder);
+
+      expect(await screen.findByRole("button", { name: /pagar con mercado pago/i })).toBeInTheDocument();
+    });
+
+    it("no se muestra si el backend no lo habilita", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user); // pendingOrder no tiene mercadoPagoCheckoutAvailable
+
+      await screen.findByText(/reserva activa/i);
+      expect(screen.queryByRole("button", { name: /pagar con mercado pago/i })).not.toBeInTheDocument();
+    });
+
+    it("el simulador (si aparece) queda marcado como herramienta de prueba, separado del botón real", async () => {
+      vi.stubEnv("DEV", true);
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user, ["Ada Lovelace"], mercadoPagoOrder);
+
+      expect(await screen.findByRole("button", { name: /pagar con mercado pago/i })).toBeInTheDocument();
+      expect(screen.getByText(/herramientas de prueba/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /aprobar pago/i })).toBeInTheDocument();
+    });
+
+    it("al hacer click, pide el checkout al backend y redirige a la URL devuelta", async () => {
+      const restoreLocation = stubLocation();
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user, ["Ada Lovelace"], mercadoPagoOrder);
+
+      mockedCreateMercadoPagoCheckout.mockResolvedValue({
+        preferenceId: "pref-1",
+        checkoutUrl: "https://sandbox.mercadopago.com/checkout/init-point",
+        orderPublicId: mercadoPagoOrder.orderPublicId,
+        expiresAt: mercadoPagoOrder.expiresAt,
+      });
+
+      await user.click(screen.getByRole("button", { name: /pagar con mercado pago/i }));
+
+      await waitFor(() => expect(window.location.href).toBe("https://sandbox.mercadopago.com/checkout/init-point"));
+      expect(mockedCreateMercadoPagoCheckout).toHaveBeenCalledWith(expect.any(String), mercadoPagoOrder.orderPublicId);
+      restoreLocation();
+    });
+
+    it("bloquea doble clic: un segundo click mientras prepara el pago no dispara una segunda solicitud", async () => {
+      const restoreLocation = stubLocation();
+      let resolvePromise: (value: Awaited<ReturnType<typeof createMercadoPagoCheckout>>) => void = () => {};
+      mockedCreateMercadoPagoCheckout.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePromise = resolve;
+        }),
+      );
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user, ["Ada Lovelace"], mercadoPagoOrder);
+
+      const button = screen.getByRole("button", { name: /pagar con mercado pago/i });
+      await user.click(button);
+      await waitFor(() => expect(screen.getByRole("button", { name: /preparando pago/i })).toBeDisabled());
+      await user.click(screen.getByRole("button", { name: /preparando pago/i }));
+
+      expect(mockedCreateMercadoPagoCheckout).toHaveBeenCalledTimes(1);
+      resolvePromise({
+        preferenceId: "pref-1",
+        checkoutUrl: "https://sandbox.mercadopago.com/checkout/init-point",
+        orderPublicId: mercadoPagoOrder.orderPublicId,
+        expiresAt: mercadoPagoOrder.expiresAt,
+      });
+      await waitFor(() => expect(window.location.href).toBe("https://sandbox.mercadopago.com/checkout/init-point"));
+      restoreLocation();
+    });
+
+    it("muestra un error controlado si falla la creación del checkout, sin redirigir", async () => {
+      const restoreLocation = stubLocation();
+      mockedCreateMercadoPagoCheckout.mockRejectedValue(new ApiError(503, "El pago con Mercado Pago no está disponible en este momento.", "MERCADOPAGO_CHECKOUT_UNAVAILABLE"));
+      const user = userEvent.setup();
+      renderModal();
+      await createPendingOrderInUi(user, ["Ada Lovelace"], mercadoPagoOrder);
+
+      await user.click(screen.getByRole("button", { name: /pagar con mercado pago/i }));
+
+      expect(await screen.findByText(/no está disponible en este momento/i)).toBeInTheDocument();
+      expect(window.location.href).toBe("");
+      restoreLocation();
+    });
   });
 
   it("evita doble submit mientras la creación de la orden está en curso", async () => {

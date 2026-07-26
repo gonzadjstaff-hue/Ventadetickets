@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 
+import CheckoutReturnPage from "../pages/CheckoutReturnPage";
 import PulseEventLanding from "../pages/PulseEventLanding";
 
 // Carga diferida: /check-in arrastra html5-qrcode (lector de cámara), la
@@ -13,6 +14,8 @@ export default function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<PulseEventLanding />} />
+      {/* Pública: destino de las back_urls de Checkout Pro. Sin dependencias pesadas, no se carga diferida. Ver CheckoutReturnPage. */}
+      <Route path="/checkout/return" element={<CheckoutReturnPage />} />
       {/* MVP sin autenticación, no linkeada desde la navegación pública. Ver CheckInPage. */}
       <Route
         path="/check-in"

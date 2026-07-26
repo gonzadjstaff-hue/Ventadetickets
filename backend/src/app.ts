@@ -7,6 +7,8 @@ import { env } from "./config/env.js";
 import { checkInRouter } from "./modules/check-in/routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { ordersRouter } from "./modules/orders/routes.js";
+import { mercadoPagoCheckoutRouter } from "./modules/payments/mercadoPagoRoutes.js";
+import { mercadoPagoWebhookRouter } from "./modules/payments/mercadoPagoWebhookRoutes.js";
 import { paymentSimulatorRouter } from "./modules/payments/routes.js";
 import { registrationsRouter } from "./modules/registrations/routes.js";
 
@@ -52,6 +54,16 @@ export function createApp(): Express {
   // proveedor de pago real detrás, aprueba lo que se le pida.
   if (env.ENABLE_MVP_PAYMENT_SIMULATOR) {
     app.use("/api/dev", paymentSimulatorRouter);
+  }
+
+  // Checkout Pro de Mercado Pago (modo prueba). Igual patrón que los flags
+  // ENABLE_MVP_*: si no está efectivamente disponible (falta el flag o
+  // faltan credenciales/URLs — ver env.MERCADOPAGO_CHECKOUT_AVAILABLE en
+  // config/env.ts), ninguna de las dos rutas se monta, así que responden 404
+  // estándar de Express en vez de confirmar que la integración existe.
+  if (env.MERCADOPAGO_CHECKOUT_AVAILABLE) {
+    app.use("/api/events", mercadoPagoCheckoutRouter);
+    app.use("/api", mercadoPagoWebhookRouter);
   }
 
   app.use(errorHandler);

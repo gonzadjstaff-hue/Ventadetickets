@@ -133,24 +133,26 @@ model TicketType {
 }
 
 model Order {
-  id                 String      @id @default(cuid())
-  publicId           String      @unique @default(cuid())
-  userId             String
-  eventId            String
-  status             OrderStatus @default(PENDING)
-  currency           String      @default("ARS")
-  subtotal           Decimal     @db.Decimal(10, 2)
-  total              Decimal     @db.Decimal(10, 2)
-  paymentProvider    String?
-  externalReference  String?
-  expiresAt          DateTime?
-  paidAt             DateTime?
-  cancelledAt        DateTime?
-  cancellationReason String?
-  refundedAt         DateTime?
-  refundReason       String?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  id                   String      @id @default(cuid())
+  publicId             String      @unique @default(cuid())
+  userId               String
+  eventId              String
+  status               OrderStatus @default(PENDING)
+  currency             String      @default("ARS")
+  subtotal             Decimal     @db.Decimal(10, 2)
+  total                Decimal     @db.Decimal(10, 2)
+  paymentProvider      String?
+  externalReference    String?
+  /// Id de la preferencia de Checkout Pro creada para esta orden (provider-agnóstico en el nombre, hoy solo lo usa Mercado Pago). Nullable: no existe hasta que se pide iniciar un pago real. Se reutiliza mientras la orden siga PENDING y no haya vencido, en vez de crear una preferencia nueva en cada llamado. Ver docs/DECISIONS.md.
+  providerPreferenceId String?
+  expiresAt            DateTime?
+  paidAt               DateTime?
+  cancelledAt          DateTime?
+  cancellationReason   String?
+  refundedAt           DateTime?
+  refundReason         String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
   user          User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
   event         Event                 @relation(fields: [eventId], references: [id], onDelete: Restrict)

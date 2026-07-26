@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 
 import {
+  createMercadoPagoCheckout,
   createVipOrder,
   getOrderStatus,
   simulatePayment,
@@ -136,6 +137,22 @@ export default function VipCheckoutModal({
     },
   });
 
+  // Redirección real a Mercado Pago: además del disabled del botón (ligado a
+  // isPending), un ref evita un segundo mutate() si el usuario logra hacer
+  // doble clic antes del primer render con isPending=true.
+  const mercadoPagoBusyRef = useRef(false);
+  const mercadoPagoMutation = useMutation({
+    mutationFn: () => createMercadoPagoCheckout(demoEvent.eventPublicId, order!.orderPublicId),
+    onSuccess: (data) => {
+      // Redirección real del navegador al checkout de Mercado Pago — nunca
+      // se simula ni se mockea esto como si hubiera redirigido.
+      window.location.href = data.checkoutUrl;
+    },
+    onSettled: () => {
+      mercadoPagoBusyRef.current = false;
+    },
+  });
+
   if (!open) return null;
 
   const hasUndownloadedTickets = liveStatus === "PAID" && !!approvedTickets && !ticketsDownloaded;
@@ -175,6 +192,13 @@ export default function VipCheckoutModal({
   const createError = getErrorMessage(createMutation.isError, createMutation.error);
   const simulateError = getErrorMessage(simulateMutation.isError, simulateMutation.error);
   const refreshError = getErrorMessage(refreshMutation.isError, refreshMutation.error);
+  const mercadoPagoError = getErrorMessage(mercadoPagoMutation.isError, mercadoPagoMutation.error);
+
+  const handleMercadoPagoCheckout = () => {
+    if (mercadoPagoBusyRef.current) return;
+    mercadoPagoBusyRef.current = true;
+    mercadoPagoMutation.mutate();
+  };
 
   const minutesLeft = order?.expiresAt
     ? Math.max(0, Math.ceil((new Date(order.expiresAt).getTime() - now) / 60000))
@@ -296,6 +320,9 @@ export default function VipCheckoutModal({
                 refreshing={refreshMutation.isPending}
                 simulateError={simulateError}
                 refreshError={refreshError}
+                onMercadoPagoCheckout={handleMercadoPagoCheckout}
+                mercadoPagoPreparing={mercadoPagoMutation.isPending}
+                mercadoPagoError={mercadoPagoError}
               />
             )}
 
@@ -435,6 +462,9 @@ function PendingOrderView({
   refreshing,
   simulateError,
   refreshError,
+  onMercadoPagoCheckout,
+  mercadoPagoPreparing,
+  mercadoPagoError,
 }: {
   order: CreateVipOrderResponse;
   paymentStatus: PaymentStatus | null;
@@ -446,6 +476,9 @@ function PendingOrderView({
   refreshing: boolean;
   simulateError: string | null;
   refreshError: string | null;
+  onMercadoPagoCheckout: () => void;
+  mercadoPagoPreparing: boolean;
+  mercadoPagoError: string | null;
 }) {
   return (
     <div className="flex flex-col items-center gap-4 py-4 text-center">
@@ -481,6 +514,24 @@ function PendingOrderView({
         </p>
       )}
 
+      {mercadoPagoError && (
+        <p role="alert" className="rounded-lg bg-[rgba(239,68,68,.12)] px-3 py-2 text-sm text-[#f87171]">
+          {mercadoPagoError}
+        </p>
+      )}
+
+      {!isLocallyExpired && order.mercadoPagoCheckoutAvailable && (
+        <button
+          type="button"
+          onClick={onMercadoPagoCheckout}
+          disabled={mercadoPagoPreparing}
+          aria-busy={mercadoPagoPreparing}
+          className={`pulse-btn-primary w-full rounded-full py-3.5 text-sm font-bold uppercase tracking-[.06em] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_RING}`}
+        >
+          {mercadoPagoPreparing ? "Preparando pago…" : "Pagar con Mercado Pago"}
+        </button>
+      )}
+
       <button
         type="button"
         onClick={onRefresh}
@@ -490,8 +541,12 @@ function PendingOrderView({
         {refreshing ? "Actualizando…" : "Actualizar estado"}
       </button>
 
+      {/* Herramientas de prueba: solo en desarrollo, nunca se muestra en producción, y siempre queda visualmente separado del botón real de arriba. */}
       {!isLocallyExpired && import.meta.env.DEV && order.paymentSimulationAvailable && (
-        <SimulatePaymentControls onSimulate={onSimulate} disabled={simulating} />
+        <div className="flex w-full flex-col items-center gap-2">
+          <p className="text-[.6rem] font-bold uppercase tracking-[.18em] text-[#7d8790]">Herramientas de prueba</p>
+          <SimulatePaymentControls onSimulate={onSimulate} disabled={simulating} />
+        </div>
       )}
     </div>
   );

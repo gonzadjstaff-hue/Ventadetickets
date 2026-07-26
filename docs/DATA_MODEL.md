@@ -14,7 +14,7 @@ Fuente de verdad: `backend/prisma/schema.prisma`. Este documento explica los mod
 | `Payment` | Un intento/registro de pago asociado a una `Order`. **No existe** para órdenes gratuitas (ver más abajo). |
 | `Ticket` | Una entrada individual emitida (una unidad de acceso), con su propio `publicId`, `qrTokenHash` y estado. |
 | `CheckIn` | Un intento de validación/escaneo de un `Ticket` en la puerta. Implementado como MVP sin autenticación (`ENABLE_MVP_CHECKIN`) — ver `docs/API.md`. |
-| `PaymentWebhookEvent` | Registro crudo de notificaciones de webhook de un proveedor de pago (no implementado todavía). |
+| `PaymentWebhookEvent` | Registro de cada notificación de webhook recibida de un proveedor de pago, para deduplicación (`@@unique([provider, externalEventId])`) y auditoría. Implementado para Mercado Pago — ver `docs/DECISIONS.md` y `docs/API.md`. |
 | `AuditLog` | Registro genérico de acciones administrativas/sensibles (no implementado todavía). |
 
 ## Relaciones principales
@@ -38,9 +38,9 @@ Todas las relaciones tienen `onDelete: Restrict` (o `SetNull` en las opcionales,
 
 Es fácil confundirlos porque los cuatro están relacionados con una compra. La diferencia:
 
-- **`Order`** — la transacción como un todo. Tiene un `status` (`PENDING`, `PAID`, `CANCELLED`, `EXPIRED`, etc.), un `total`, un `subtotal` y (desde la compra VIP) un `expiresAt` real: mientras está `PENDING`, es hasta cuándo vale la reserva de cupo (`ORDER_EXPIRATION_MINUTES`, expiración perezosa — ver `docs/DECISIONS.md`). Es el nivel "recibo".
+- **`Order`** — la transacción como un todo. Tiene un `status` (`PENDING`, `PAID`, `CANCELLED`, `EXPIRED`, `REFUNDED`, etc.), un `total`, un `subtotal` y (desde la compra VIP) un `expiresAt` real: mientras está `PENDING`, es hasta cuándo vale la reserva de cupo (`ORDER_EXPIRATION_MINUTES`, expiración perezosa — ver `docs/DECISIONS.md`). `providerPreferenceId` (nullable, agregado para Checkout Pro de Mercado Pago) guarda el id de la preferencia creada para esa orden, para reutilizarla en vez de crear una nueva en cada intento de pago. Es el nivel "recibo".
 - **`OrderItem`** — una línea dentro de esa orden: "N unidades de este `TicketType`, a tal precio unitario". Una orden puede tener varias líneas (hoy, tanto en General como en VIP, siempre es exactamente una: `quantity = 1`). `attendeeNames` (`Json?`, array de strings) guarda el nombre de cada asistente cargado en el checkout VIP, en el mismo orden en que se van a emitir los `Ticket` cuando el pago quede aprobado — General no lo usa (queda `null`), porque ahí alcanza con `Ticket.holderName`.
-- **`Payment`** — el intento de cobro de una orden con un proveedor real (mock o Mercado Pago). Una orden puede tener cero (si es gratuita), uno o varios `Payment` (reintentos: cada simulación de pago hace `upsert` sobre el mismo `Payment` de la orden, identificado por `provider + providerPaymentId`). **El registro General nunca crea `Payment`**: si el total es 0, la orden pasa a `PAID` directamente. La compra VIP sí crea `Payment` — hoy con `provider = "mock-simulator"` (ver `docs/DECISIONS.md`), mañana con Mercado Pago real.
+- **`Payment`** — el intento de cobro de una orden con un proveedor real (mock o Mercado Pago). Una orden puede tener cero (si es gratuita), uno o varios `Payment` (reintentos: cada aprobación hace `upsert` sobre el mismo `Payment` de la orden, identificado por `provider + providerPaymentId`). **El registro General nunca crea `Payment`**: si el total es 0, la orden pasa a `PAID` directamente. La compra VIP sí crea `Payment`, con `provider = "mock-simulator"` (simulador, ver `docs/DECISIONS.md`) o `provider = "mercadopago"` (Checkout Pro real, modo prueba).
 - **`Ticket`** — el acceso individual en sí, el que se escanea en la puerta. Una `OrderItem` con `quantity = 1` y `ticketsPerUnit = 1` (General, VIP Individual) genera un `Ticket`; una `OrderItem` de VIP Doble (`ticketsPerUnit = 2`) genera dos `Ticket` a partir de la misma línea, uno por nombre en `OrderItem.attendeeNames`, cada uno con su propio `publicId`, token y hash. Implementado en `backend/src/modules/payments/ticketEmissionService.ts`.
 
 ## `ticketsPerUnit`

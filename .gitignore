@@ -3,3 +3,4 @@ skills/
 **/.env
 **/dist/
 **/coverage/
+.vercel

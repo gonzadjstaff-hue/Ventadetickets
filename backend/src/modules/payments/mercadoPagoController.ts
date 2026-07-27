@@ -44,15 +44,33 @@ export async function mercadoPagoWebhookController(req: Request, res: Response, 
     const query = mercadoPagoWebhookQuerySchema.parse(req.query);
     const body = mercadoPagoWebhookBodySchema.parse(req.body ?? {});
 
-    const dataId = query["data.id"] ?? (body.data?.id !== undefined ? String(body.data.id) : undefined);
-    const xSignature = firstHeaderValue(req.headers["x-signature"] as string | string[] | undefined);
-    const xRequestId = firstHeaderValue(req.headers["x-request-id"] as string | string[] | undefined);
+    const dataIdFromQuery = query["data.id"];
+    const dataIdFromBody = body.data?.id !== undefined ? String(body.data.id) : undefined;
+    const dataId = dataIdFromQuery ?? dataIdFromBody;
+    const xSignatureRaw = req.headers["x-signature"] as string | string[] | undefined;
+    const xRequestIdRaw = req.headers["x-request-id"] as string | string[] | undefined;
+    const xSignature = firstHeaderValue(xSignatureRaw);
+    const xRequestId = firstHeaderValue(xRequestIdRaw);
 
     // "webhook recibido" + tipo/action/payment id — ninguno de estos valores
     // es sensible (son metadatos del propio webhook, no el payload completo
     // ni la firma). Se loguea antes de validar la firma a propósito: así
     // queda registro de que algo llegó, aunque la firma termine rechazándolo.
-    console.log("[mercadopago_webhook] webhook recibido", { type: body.type ?? query.type, action: body.action, dataId });
+    // Diagnóstico temporal (ver docs/DECISIONS.md): se loguean por separado
+    // el data.id de la query string y el del body — si un webhook real
+    // alguna vez trae valores distintos entre ambas fuentes (o le falta a
+    // una), esto lo va a mostrar sin tener que adivinar. También si
+    // x-request-id llegó como array (headers repetidos) en vez de un único
+    // valor.
+    console.log("[mercadopago_webhook] webhook recibido", {
+      type: body.type ?? query.type,
+      action: body.action,
+      dataIdFromQuery,
+      dataIdFromBody,
+      dataId,
+      xRequestIdIsArray: Array.isArray(xRequestIdRaw),
+      xSignatureIsArray: Array.isArray(xSignatureRaw),
+    });
 
     const signatureValid = provider.verifyWebhookSignature({ xSignature, xRequestId, dataId });
     console.log(`[mercadopago_webhook] resultado de validación de firma: ${signatureValid ? "válida" : "inválida"}`, { dataId });

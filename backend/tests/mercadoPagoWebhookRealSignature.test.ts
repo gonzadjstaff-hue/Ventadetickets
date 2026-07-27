@@ -10,17 +10,17 @@ import { cleanupEvent, cleanupUserByEmail, createFixtureEvent, createFixtureOrde
 /**
  * A diferencia de mercadoPagoWebhook.test.ts (que mockea todo
  * `mercadoPagoProvider`, incluido `verifyWebhookSignature`), este archivo NO
- * mockea la validación de firma: deja `verifySignature` real (el validador
- * oficial del SDK, mismo código que corre en producción) y solo reemplaza
+ * mockea la validación de firma: deja `verifySignature` real — desde este
+ * bloque, delega en la implementación propia (`webhookSignature.ts`, no ya
+ * en el validador del SDK oficial, ver docs/DECISIONS.md) — y solo reemplaza
  * `getPayment`/`createPreference`/`getPreference` (las llamadas de red) en
- * `mercadoPagoClient.ts`. Ejercita de punta a punta exactamente lo que pidió
- * el diagnóstico: Controller → Provider.verifyWebhookSignature → SDK real,
- * con headers/body representativos de un webhook real de Mercado Pago
- * (`type=payment`, `action=payment.updated`, `data.id=<payment_id>`,
- * `x-signature`/`x-request-id` firmados con el algoritmo oficial), no un
- * simulador. Este es el gap que dejaba pasar por alto una firma real
- * rechazada mientras las pruebas contra el provider mockeado seguían en
- * verde.
+ * `mercadoPagoClient.ts`. Ejercita de punta a punta: Controller →
+ * Provider.verifyWebhookSignature → validador propio, con headers/body
+ * representativos de un webhook real de Mercado Pago (`type=payment`,
+ * `action=payment.updated`, `data.id=<payment_id>`, `x-signature`/
+ * `x-request-id` firmados con el algoritmo documentado), no un simulador.
+ * Este es el gap que dejaba pasar por alto una firma real rechazada mientras
+ * las pruebas contra el provider mockeado seguían en verde.
  */
 
 const { mockGetPayment } = vi.hoisted(() => ({
@@ -215,12 +215,12 @@ describe("POST /api/webhooks/mercadopago — firma real (SDK sin mockear)", () =
 
     const logged = allLoggedText();
     expect(logged).toContain("firma inválida");
-    expect(logged).toContain("SignatureMismatch");
+    expect(logged).toContain("signature_mismatch");
     expect(logged).not.toContain(WEBHOOK_SECRET);
     expect(logged).not.toContain(xSignature);
   });
 
-  it("header x-signature ausente (webhook sin firmar): 401, motivo MissingSignatureHeader logueado", async () => {
+  it("header x-signature ausente (webhook sin firmar): 401, motivo missing_signature_header logueado", async () => {
     const paymentId = randomUUID();
     const notificationId = randomUUID();
 
@@ -231,7 +231,7 @@ describe("POST /api/webhooks/mercadopago — firma real (SDK sin mockear)", () =
 
     expect(res.status).toBe(401);
     expect(mockGetPayment).not.toHaveBeenCalled();
-    expect(allLoggedText()).toContain("MissingSignatureHeader");
+    expect(allLoggedText()).toContain("missing_signature_header");
   });
 
   it("firma real válida pero external_reference no corresponde a ninguna orden: 200, ignorado, motivo logueado (no se pierde silenciosamente)", async () => {
@@ -273,5 +273,59 @@ describe("POST /api/webhooks/mercadopago — firma real (SDK sin mockear)", () =
     const logged = allLoggedText();
     expect(logged).toContain("error procesando la notificación");
     expect(logged).toContain("not_found");
+  });
+
+  it("data.id ausente en la query, presente solo en el body: se usa el del body para firmar y para consultar el pago", async () => {
+    const order = await createPendingOrder(["Ada Lovelace"]);
+    const paymentId = randomUUID();
+    const notificationId = randomUUID();
+    const ts = nowSeconds();
+    // Firmado con el dataId que va a ir en el body — la query nunca lleva "data.id" en este caso.
+    const xSignature = signHeader(paymentId, "req-" + notificationId, ts);
+    mockGetPayment.mockResolvedValue(fakeRawPayment({ id: paymentId, external_reference: order.publicId, transaction_amount: 35000 }));
+
+    const res = await request(app)
+      .post("/api/webhooks/mercadopago")
+      .query({ type: "payment" }) // sin "data.id"
+      .set("x-signature", xSignature)
+      .set("x-request-id", "req-" + notificationId)
+      .send(realisticWebhookBody(notificationId, paymentId));
+
+    expect(res.status).toBe(200);
+    expect(mockGetPayment).toHaveBeenCalledWith(paymentId);
+    const dbOrder = await prisma.order.findUnique({ where: { id: order.id } });
+    expect(dbOrder?.status).toBe("PAID");
+
+    const logged = allLoggedText();
+    // JSON.stringify omite las claves con valor undefined — "dataIdFromQuery"
+    // directamente no aparece cuando la query no traía "data.id".
+    expect(logged).not.toContain('"dataIdFromQuery"');
+    expect(logged).toContain(`"dataIdFromBody":"${paymentId}"`);
+  });
+
+  it("data.id presente en query Y en body con valores distintos: prioriza el de la query (documentado) tanto para firmar como para consultar", async () => {
+    const order = await createPendingOrder(["Ada Lovelace"]);
+    const queryPaymentId = randomUUID();
+    const bodyPaymentId = randomUUID(); // deliberadamente distinto
+    const notificationId = randomUUID();
+    const ts = nowSeconds();
+    // Firmado con el dataId de la QUERY — si el código usara el del body, la firma no matchearía y daría 401.
+    const xSignature = signHeader(queryPaymentId, "req-" + notificationId, ts);
+    mockGetPayment.mockResolvedValue(fakeRawPayment({ id: queryPaymentId, external_reference: order.publicId, transaction_amount: 35000 }));
+
+    const res = await request(app)
+      .post("/api/webhooks/mercadopago")
+      .query({ "data.id": queryPaymentId, type: "payment" })
+      .set("x-signature", xSignature)
+      .set("x-request-id", "req-" + notificationId)
+      .send({ ...realisticWebhookBody(notificationId, bodyPaymentId), data: { id: bodyPaymentId } });
+
+    expect(res.status).toBe(200);
+    expect(mockGetPayment).toHaveBeenCalledWith(queryPaymentId);
+    expect(mockGetPayment).not.toHaveBeenCalledWith(bodyPaymentId);
+
+    const logged = allLoggedText();
+    expect(logged).toContain(`"dataIdFromQuery":"${queryPaymentId}"`);
+    expect(logged).toContain(`"dataIdFromBody":"${bodyPaymentId}"`);
   });
 });

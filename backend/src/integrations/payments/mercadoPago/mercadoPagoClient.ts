@@ -1,7 +1,8 @@
-import { InvalidWebhookSignatureError, MercadoPagoConfig, Payment, Preference, WebhookSignatureValidator } from "mercadopago";
+import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
 
 import { env } from "../../../config/env.js";
 import { PaymentProviderError } from "../types.js";
+import { verifyMercadoPagoWebhookSignature } from "./webhookSignature.js";
 
 /**
  * El paquete "mercadopago" solo exporta las clases (`Preference`, `Payment`,
@@ -108,23 +109,24 @@ export async function getPayment(providerPaymentId: string): Promise<PaymentResp
 /**
  * Nunca hace red: valida localmente el HMAC-SHA256 del manifest
  * `id:<dataId>;request-id:<xRequestId>;ts:<ts>;` contra el secret, con
- * comparación timing-safe (`crypto.timingSafeEqual`) — delegado al validador
- * oficial del SDK en vez de reimplementar el algoritmo a mano, para no
- * arriesgar un desvío sutil del formato exacto documentado por Mercado Pago
- * (docs/DECISIONS.md, fecha de consulta 2026-07-25).
+ * comparación timing-safe. Implementación propia (`webhookSignature.ts`), no
+ * el validador del SDK oficial — ver el comentario al inicio de ese archivo
+ * para el porqué (dos bugs reales encontrados en esta función exacta del SDK
+ * dentro del mismo major: un bug de `toleranceSeconds` que rechazaba
+ * cualquier webhook real por comparar segundos contra milisegundos sin
+ * convertir, y uno de mayúsculas/minúsculas en `data.id` corregido recién el
+ * 2026-06-23 en mercadopago/sdk-nodejs#439). Mismo algoritmo documentado por
+ * Mercado Pago, mismo rigor — nunca se debilita ni se saltea la validación.
+ * Igual que antes, la implementación propia tampoco implementa una ventana
+ * de tolerancia contra replay (no hay parámetro `toleranceSeconds` acá): se
+ * sigue mitigando solo con la idempotencia de `PaymentWebhookEvent` — mismo
+ * trade-off ya documentado, no algo nuevo de este cambio.
  *
- * **No se usa `toleranceSeconds`** (ventana de tolerancia contra replay) a
- * propósito: se probó con vectores propios (`ts` en segundos, como lo manda
- * Mercado Pago realmente) y el chequeo interno del SDK instalado
- * (`mercadopago@3.2.1`, `src/utils/webhook/index.ts`) compara ese `ts` contra
- * `Date.now()` **sin convertir de segundos a milisegundos** — con
- * `toleranceSeconds` seteado, esto rechaza como `TimestampOutOfTolerance`
- * absolutamente cualquier webhook real, por más que su firma sea
- * genuinamente válida. Confirmado con `backend/tests/mercadoPagoSignature.test.ts`.
- * Bug de esta versión del SDK, no de este código — reportar/revisar cuando
- * se actualice la dependencia (ver docs/DECISIONS.md y docs/ROADMAP.md).
- * Sin esta opción, la protección contra replay queda pendiente (mitigada en
- * parte por la idempotencia de `PaymentWebhookEvent`).
+ * **Logging temporal de diagnóstico** (componentes normalizados del
+ * manifiesto, nunca el secret ni un hash completo) mientras se termina de
+ * confirmar la causa de un `SignatureMismatch` visto en producción con un
+ * webhook real — ver docs/DECISIONS.md. Se puede reducir a solo el `reason`
+ * una vez confirmado y estable.
  */
 export function verifySignature(input: { xSignature: string | undefined; xRequestId: string | undefined; dataId: string | undefined }): boolean {
   if (!env.MERCADOPAGO_WEBHOOK_SECRET) {
@@ -135,39 +137,30 @@ export function verifySignature(input: { xSignature: string | undefined; xReques
     return false;
   }
 
-  try {
-    WebhookSignatureValidator.validate({
-      xSignature: input.xSignature,
-      xRequestId: input.xRequestId,
-      dataId: input.dataId,
-      secret: env.MERCADOPAGO_WEBHOOK_SECRET,
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof InvalidWebhookSignatureError) {
-      // `error.reason` es el enum tipado que el propio SDK expone para esto
-      // (SignatureFailureReason: firma ausente/malformada, hash de una
-      // versión no soportada, HMAC que no coincide — típicamente
-      // MERCADOPAGO_WEBHOOK_SECRET incorrecto —, o timestamp fuera de
-      // tolerancia). Nunca se loguea `input.xSignature` (el hash recibido) ni
-      // el secret — solo el motivo, el dataId (payment id, no sensible) y el
-      // x-request-id (id de correlación de Mercado Pago, no sensible).
-      console.warn("[mercadopago_webhook] firma inválida", {
-        reason: error.reason,
-        dataId: input.dataId,
-        xRequestId: input.xRequestId,
-      });
-      return false;
-    }
-    // Cualquier otro fallo (ej. tipo inesperado) también se trata como firma
-    // inválida: nunca se debe procesar un webhook si la validación no pudo
-    // completarse con éxito. A diferencia de InvalidWebhookSignatureError,
-    // esto es inesperado — se loguea el mensaje del error para poder
-    // diagnosticarlo (nunca el objeto crudo, que podría incluir el secret
-    // pasado a `WebhookSignatureValidator.validate`).
-    console.error("[mercadopago_webhook] error inesperado validando la firma", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return false;
+  const result = verifyMercadoPagoWebhookSignature({
+    xSignature: input.xSignature,
+    xRequestId: input.xRequestId,
+    dataId: input.dataId,
+    secret: env.MERCADOPAGO_WEBHOOK_SECRET,
+  });
+
+  // Nunca se loguea `input.xSignature` (el header crudo, incluye el hash
+  // recibido) ni el secret ni ningún hash completo (ni el recibido ni el
+  // calculado) — solo si el manifiesto tuvo un componente v1 reconocible.
+  const logFields = {
+    reason: result.reason,
+    ts: result.ts,
+    dataId: result.dataId,
+    xRequestId: result.xRequestId,
+    manifest: result.manifest,
+    hasV1: result.hasV1,
+  };
+
+  if (result.valid) {
+    console.log("[mercadopago_webhook] firma válida", logFields);
+  } else {
+    console.warn("[mercadopago_webhook] firma inválida", logFields);
   }
+
+  return result.valid;
 }

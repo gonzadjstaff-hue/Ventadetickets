@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * `id:<dataId>;request-id:<xRequestId>;ts:<ts>;`, HMAC-SHA256 en hexadecimal,
  * header con forma `ts=<ts>,v1=<hash>`. No importa el mismo algoritmo desde
  * el código de producción — arma la firma "a mano" para verificar que
- * `verifySignature` (que sí delega en el validador oficial del SDK) acepta y
+ * `verifySignature` (que delega en la implementación propia de
+ * `webhookSignature.ts`, no en el SDK — ver docs/DECISIONS.md) acepta y
  * rechaza exactamente lo que la documentación dice que debería.
  */
 const SECRET = "test-webhook-secret-vectors";
@@ -103,13 +104,15 @@ describe("verifySignature — vectores propios del algoritmo oficial de x-signat
     expect(verifySignature({ xSignature: "no-tiene-el-formato-esperado", xRequestId: "req-abc", dataId: "123456789" })).toBe(false);
   });
 
-  it("timestamp viejo pero con hash genuinamente válido se acepta (sin ventana de tolerancia — ver nota en mercadoPagoClient.ts)", async () => {
-    // No se usa `toleranceSeconds`: se comprobó (ver el test de arriba y el
-    // comentario en mercadoPagoClient.ts) que la versión instalada del SDK
-    // compara `ts` en segundos contra `Date.now()` en milisegundos sin
-    // convertir, lo que rechazaría como inválido cualquier ts real por más
-    // que su firma sea genuina. Este test documenta el comportamiento actual
-    // (acepta timestamps viejos) — no una ventana de tolerancia deseada.
+  it("timestamp viejo pero con hash genuinamente válido se acepta (sin ventana de tolerancia — ver nota en mercadoPagoClient.ts / webhookSignature.ts)", async () => {
+    // La implementación propia (webhookSignature.ts, ver docs/DECISIONS.md)
+    // no implementa ninguna ventana de tolerancia contra replay a propósito
+    // (mismo criterio que ya regía con el validador del SDK, que además
+    // tenía un bug real ahí — comparaba `ts` en segundos contra `Date.now()`
+    // en milisegundos sin convertir). Este test documenta el comportamiento
+    // actual (acepta timestamps viejos) — no una ventana de tolerancia
+    // deseada; la protección contra replay sigue mitigada solo por la
+    // idempotencia de `PaymentWebhookEvent`.
     const verifySignature = await importVerifySignature();
     const oldTs = String(Math.floor(Date.now() / 1000) - 3600); // 1 hora atrás
     const xSignature = sign("123456789", "req-abc", oldTs);

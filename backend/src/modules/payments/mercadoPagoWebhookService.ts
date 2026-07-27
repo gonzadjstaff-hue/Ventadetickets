@@ -58,10 +58,21 @@ function expectedLiveMode(): boolean {
  *    actual — nunca duplica tickets ni pisa un estado terminal.
  */
 export async function processMercadoPagoWebhook(params: ProcessWebhookParams): Promise<WebhookOutcome> {
+  // Ninguno de estos campos es sensible: notificationId/paymentId son ids de
+  // Mercado Pago (no secretos), eventType es el tipo de evento declarado por
+  // el propio webhook. Nunca se loguea el payload crudo completo acá (eso
+  // queda solo persistido en PaymentWebhookEvent.payload, ya validado por Zod).
+  console.log("[mercadopago_webhook] notificación recibida", {
+    notificationId: params.notificationId,
+    eventType: params.eventType,
+    paymentId: params.paymentId,
+  });
+
   const existingEvent = await prisma.paymentWebhookEvent.findUnique({
     where: { provider_externalEventId: { provider: PROVIDER, externalEventId: params.notificationId } },
   });
   if (existingEvent?.processed) {
+    console.log("[mercadopago_webhook] notificación ya procesada, se ignora", { notificationId: params.notificationId });
     return { kind: "already_processed" };
   }
 
@@ -86,6 +97,9 @@ export async function processMercadoPagoWebhook(params: ProcessWebhookParams): P
         const fresh = await prisma.paymentWebhookEvent.findUnique({
           where: { provider_externalEventId: { provider: PROVIDER, externalEventId: params.notificationId } },
         });
+        console.log("[mercadopago_webhook] notificación ya procesada (carrera con otra request), se ignora", {
+          notificationId: params.notificationId,
+        });
         if (fresh?.processed) return { kind: "already_processed" };
         return { kind: "already_processed" };
       }
@@ -97,6 +111,13 @@ export async function processMercadoPagoWebhook(params: ProcessWebhookParams): P
   // que puedan venir en el body del webhook — se ignoran a propósito (ni
   // siquiera se leen) y se pide el pago real a Mercado Pago.
   const payment = await params.provider.getPayment(params.paymentId);
+  console.log("[mercadopago_webhook] pago consultado a Mercado Pago", {
+    notificationId: params.notificationId,
+    providerPaymentId: payment.providerPaymentId,
+    status: payment.status,
+    rawStatus: payment.rawStatus,
+    liveMode: payment.liveMode,
+  });
 
   const order = payment.externalReference
     ? await prisma.order.findUnique({
@@ -106,19 +127,41 @@ export async function processMercadoPagoWebhook(params: ProcessWebhookParams): P
     : null;
 
   if (!order) {
+    console.warn("[mercadopago_webhook] ignorado: ninguna orden coincide con external_reference", {
+      notificationId: params.notificationId,
+      externalReference: payment.externalReference,
+    });
     await markEventProcessed(params.notificationId, null, null);
     return { kind: "ignored", reason: "order_not_found" };
   }
 
   if (Math.abs(Number(order.total) - payment.amount) > AMOUNT_EPSILON) {
+    console.warn("[mercadopago_webhook] ignorado: el importe del pago no coincide con el de la orden", {
+      notificationId: params.notificationId,
+      orderPublicId: order.publicId,
+      orderTotal: Number(order.total),
+      paymentAmount: payment.amount,
+    });
     await markEventProcessed(params.notificationId, null, order.id);
     return { kind: "ignored", reason: "amount_mismatch" };
   }
   if (order.currency !== payment.currency) {
+    console.warn("[mercadopago_webhook] ignorado: la moneda del pago no coincide con la de la orden", {
+      notificationId: params.notificationId,
+      orderPublicId: order.publicId,
+      orderCurrency: order.currency,
+      paymentCurrency: payment.currency,
+    });
     await markEventProcessed(params.notificationId, null, order.id);
     return { kind: "ignored", reason: "currency_mismatch" };
   }
   if (payment.liveMode !== expectedLiveMode()) {
+    console.warn("[mercadopago_webhook] ignorado: live_mode del pago incoherente con las credenciales configuradas", {
+      notificationId: params.notificationId,
+      orderPublicId: order.publicId,
+      expectedLiveMode: expectedLiveMode(),
+      paymentLiveMode: payment.liveMode,
+    });
     await markEventProcessed(params.notificationId, null, order.id);
     return { kind: "ignored", reason: "live_mode_mismatch" };
   }
@@ -147,6 +190,13 @@ export async function processMercadoPagoWebhook(params: ProcessWebhookParams): P
   const orderStatus = await applyOrderTransition(order, payment);
 
   await markEventProcessed(params.notificationId, paymentRow.id, order.id);
+
+  console.log("[mercadopago_webhook] notificación procesada", {
+    notificationId: params.notificationId,
+    orderPublicId: order.publicId,
+    orderStatus,
+    paymentStatus: payment.status,
+  });
 
   return { kind: "applied", orderStatus, paymentStatus: payment.status };
 }

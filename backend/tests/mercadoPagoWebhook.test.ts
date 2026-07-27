@@ -447,4 +447,100 @@ describe("POST /api/webhooks/mercadopago", () => {
       errorSpy.mockRestore();
     });
   });
+
+  /**
+   * Antes de este bloque, `processMercadoPagoWebhook` calculaba estos
+   * motivos de "ignored" pero el controller descartaba el resultado sin
+   * loguear nada — el endpoint respondía 200 igual, sin dejar ningún rastro
+   * de por qué no se había aprobado la orden (ver diagnóstico de producción,
+   * SESSION_HANDOFF.md). Estos tests cubren específicamente que el motivo
+   * exacto ahora queda visible en los logs, sin filtrar el email del
+   * comprador ni nombres de asistentes.
+   */
+  describe("logging: motivo exacto de cada 'ignored' y de la aprobación", () => {
+    function allLoggedText(logSpy: ReturnType<typeof vi.spyOn>, warnSpy: ReturnType<typeof vi.spyOn>, errorSpy: ReturnType<typeof vi.spyOn>): string {
+      return [...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls]
+        .map((call) => call.map((arg) => JSON.stringify(arg)).join(" "))
+        .join("\n");
+    }
+
+    it("importe distinto: el motivo (amount_mismatch) y los valores comparados quedan logueados", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const order = await createPendingOrder(vipIndividual, ["Ada"]);
+      const paymentId = randomUUID();
+      mockGetPayment.mockResolvedValue(fakePayment({ providerPaymentId: paymentId, externalReference: order.publicId, amount: 1 }));
+      await postWebhook({ notificationId: randomUUID(), dataId: paymentId });
+
+      const logged = allLoggedText(logSpy, warnSpy, errorSpy);
+      expect(logged).toContain("importe del pago no coincide");
+      expect(logged).toContain(order.publicId);
+      expect(logged).not.toContain(user.email);
+
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it("moneda distinta: el motivo (currency_mismatch) queda logueado", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const order = await createPendingOrder(vipIndividual, ["Ada"]);
+      const paymentId = randomUUID();
+      mockGetPayment.mockResolvedValue(fakePayment({ providerPaymentId: paymentId, externalReference: order.publicId, currency: "USD" }));
+      await postWebhook({ notificationId: randomUUID(), dataId: paymentId });
+
+      const logged = allLoggedText(logSpy, warnSpy, errorSpy);
+      expect(logged).toContain("moneda del pago no coincide");
+      expect(logged).toContain("USD");
+
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it("live_mode incoherente: el motivo (live_mode_mismatch) queda logueado con ambos valores", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const order = await createPendingOrder(vipIndividual, ["Ada"]);
+      const paymentId = randomUUID();
+      mockGetPayment.mockResolvedValue(fakePayment({ providerPaymentId: paymentId, externalReference: order.publicId, liveMode: true }));
+      await postWebhook({ notificationId: randomUUID(), dataId: paymentId });
+
+      const logged = allLoggedText(logSpy, warnSpy, errorSpy);
+      expect(logged).toContain("live_mode del pago incoherente con las credenciales configuradas");
+
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it("aprobado: queda logueada la transición final aplicada (orderStatus/paymentStatus), sin datos del comprador", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const order = await createPendingOrder(vipIndividual, ["Ada"]);
+      const paymentId = randomUUID();
+      mockGetPayment.mockResolvedValue(fakePayment({ providerPaymentId: paymentId, externalReference: order.publicId }));
+      await postWebhook({ notificationId: randomUUID(), dataId: paymentId });
+
+      const logged = allLoggedText(logSpy, warnSpy, errorSpy);
+      expect(logged).toContain("notificación procesada");
+      expect(logged).toContain(order.publicId);
+      expect(logged).toContain("PAID");
+      expect(logged).not.toContain(user.email);
+      expect(logged).not.toContain("Ada");
+
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+  });
 });

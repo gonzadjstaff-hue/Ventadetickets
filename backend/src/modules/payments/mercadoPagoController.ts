@@ -48,8 +48,19 @@ export async function mercadoPagoWebhookController(req: Request, res: Response, 
     const xSignature = firstHeaderValue(req.headers["x-signature"] as string | string[] | undefined);
     const xRequestId = firstHeaderValue(req.headers["x-request-id"] as string | string[] | undefined);
 
+    // "webhook recibido" + tipo/action/payment id — ninguno de estos valores
+    // es sensible (son metadatos del propio webhook, no el payload completo
+    // ni la firma). Se loguea antes de validar la firma a propósito: así
+    // queda registro de que algo llegó, aunque la firma termine rechazándolo.
+    console.log("[mercadopago_webhook] webhook recibido", { type: body.type ?? query.type, action: body.action, dataId });
+
     const signatureValid = provider.verifyWebhookSignature({ xSignature, xRequestId, dataId });
+    console.log(`[mercadopago_webhook] resultado de validación de firma: ${signatureValid ? "válida" : "inválida"}`, { dataId });
     if (!signatureValid) {
+      // El motivo exacto (header ausente/malformado, hash de versión no
+      // soportada, HMAC que no coincide, timestamp fuera de tolerancia) ya
+      // quedó logueado dentro de mercadoPagoClient.ts/verifySignature — acá
+      // solo se decide la respuesta HTTP.
       res.status(401).json({ error: { code: "INVALID_WEBHOOK_SIGNATURE", message: "Firma de webhook inválida o ausente." } });
       return;
     }
@@ -62,6 +73,13 @@ export async function mercadoPagoWebhookController(req: Request, res: Response, 
 
     const notificationId = body.id !== undefined ? String(body.id) : `${dataId}:${xRequestId ?? "no-request-id"}`;
 
+    // El resultado (aplicado / ignorado y por qué / ya procesado) ya queda
+    // logueado dentro de processMercadoPagoWebhook — acá siempre se responde
+    // 200 una vez que no hubo una excepción, por diseño: un "ignorado" (orden
+    // no encontrada, importe/moneda/live_mode que no coinciden) es una
+    // condición permanente que un reintento de Mercado Pago no va a resolver
+    // (ver docs/DECISIONS.md) — pero ahora, a diferencia de antes, queda
+    // registrado el motivo exacto en los logs.
     await processMercadoPagoWebhook({
       provider,
       notificationId,
@@ -72,6 +90,18 @@ export async function mercadoPagoWebhookController(req: Request, res: Response, 
 
     res.status(200).json({ received: true });
   } catch (error) {
+    // Antes este catch no logueaba nada: un timeout/401/403/404/429/5xx al
+    // consultar el pago server-to-server (u otro error inesperado) se
+    // traducía directo a una respuesta HTTP sin dejar ningún rastro en los
+    // logs — exactamente el escenario que impedía diagnosticar un webhook
+    // real que fallara acá. Se loguea el "kind" (clasificación ya estable, ver
+    // integrations/payments/types.ts) y el mensaje del error, nunca el error
+    // crudo completo (podría incluir detalles de la respuesta de Mercado
+    // Pago con datos de la cuenta).
+    console.error("[mercadopago_webhook] error procesando la notificación", {
+      kind: error instanceof PaymentProviderError ? error.kind : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    });
     // Un timeout/401/403/404/429/5xx al consultar el pago server-to-server
     // (dentro de processMercadoPagoWebhook) llega acá como PaymentProviderError
     // cruda — se traduce a una respuesta HTTP controlada (>=500, para que

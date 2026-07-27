@@ -127,7 +127,13 @@ export async function getPayment(providerPaymentId: string): Promise<PaymentResp
  * parte por la idempotencia de `PaymentWebhookEvent`).
  */
 export function verifySignature(input: { xSignature: string | undefined; xRequestId: string | undefined; dataId: string | undefined }): boolean {
-  if (!env.MERCADOPAGO_WEBHOOK_SECRET) return false;
+  if (!env.MERCADOPAGO_WEBHOOK_SECRET) {
+    // Falta de configuración, no un webhook falsificado — se distingue en el
+    // log para no confundir "nadie intentó autenticarse" con "faltó cargar
+    // la variable en el entorno" (ver docs/DEPLOYMENT.md, MERCADOPAGO_WEBHOOK_SECRET).
+    console.error("[mercadopago_webhook] MERCADOPAGO_WEBHOOK_SECRET no está configurado: firma rechazada sin validar.");
+    return false;
+  }
 
   try {
     WebhookSignatureValidator.validate({
@@ -138,10 +144,30 @@ export function verifySignature(input: { xSignature: string | undefined; xReques
     });
     return true;
   } catch (error) {
-    if (error instanceof InvalidWebhookSignatureError) return false;
+    if (error instanceof InvalidWebhookSignatureError) {
+      // `error.reason` es el enum tipado que el propio SDK expone para esto
+      // (SignatureFailureReason: firma ausente/malformada, hash de una
+      // versión no soportada, HMAC que no coincide — típicamente
+      // MERCADOPAGO_WEBHOOK_SECRET incorrecto —, o timestamp fuera de
+      // tolerancia). Nunca se loguea `input.xSignature` (el hash recibido) ni
+      // el secret — solo el motivo, el dataId (payment id, no sensible) y el
+      // x-request-id (id de correlación de Mercado Pago, no sensible).
+      console.warn("[mercadopago_webhook] firma inválida", {
+        reason: error.reason,
+        dataId: input.dataId,
+        xRequestId: input.xRequestId,
+      });
+      return false;
+    }
     // Cualquier otro fallo (ej. tipo inesperado) también se trata como firma
     // inválida: nunca se debe procesar un webhook si la validación no pudo
-    // completarse con éxito.
+    // completarse con éxito. A diferencia de InvalidWebhookSignatureError,
+    // esto es inesperado — se loguea el mensaje del error para poder
+    // diagnosticarlo (nunca el objeto crudo, que podría incluir el secret
+    // pasado a `WebhookSignatureValidator.validate`).
+    console.error("[mercadopago_webhook] error inesperado validando la firma", {
+      message: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

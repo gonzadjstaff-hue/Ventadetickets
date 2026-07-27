@@ -113,6 +113,26 @@ const envSchema = z.object({
   APP_PUBLIC_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   /** URL pública del backend (sin barra final), usada para armar notification_url del webhook. */
   BACKEND_PUBLIC_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  /**
+   * Credenciales de la cuenta de servicio de Firebase (Admin SDK), usadas
+   * exclusivamente para verificar Firebase ID Tokens de administradores y
+   * validadores — nunca para los compradores/asistentes que registran o
+   * compran entradas (esos flujos siguen sin autenticación). Las tres deben
+   * estar presentes para que la autenticación quede disponible; si falta
+   * alguna, el arranque no se rompe (mismo criterio que MERCADOPAGO_*), pero
+   * cualquier intento real de verificar un token falla con un error claro
+   * (ver backend/src/integrations/firebase/firebaseAdmin.ts).
+   */
+  FIREBASE_PROJECT_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  FIREBASE_CLIENT_EMAIL: z.preprocess(emptyToUndefined, z.string().optional()),
+  /**
+   * Clave privada PEM de la cuenta de servicio. En variables de entorno (.env,
+   * Render, Vercel) los saltos de línea reales no sobreviven, así que suele
+   * cargarse con "\n" literales — la normalización a saltos de línea reales
+   * se hace en firebaseAdmin.ts, no acá, para mantener env.ts como una capa
+   * de solo parseo/validación.
+   */
+  FIREBASE_PRIVATE_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;

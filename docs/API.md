@@ -2,7 +2,7 @@
 
 Base URL en desarrollo: `http://localhost:4000`. No hay prefijo de versión.
 
-Estos son **todos** los endpoints que existen hoy. Cualquier otro endpoint mencionado en `project.md` (autenticación, admin) todavía no está implementado.
+Estos son **todos** los endpoints que existen hoy. Cualquier otro endpoint mencionado en `project.md` (admin) todavía no está implementado.
 
 ---
 
@@ -18,6 +18,46 @@ Endpoint de salud, sin lógica de negocio.
   "timestamp": "2026-07-24T18:26:22.695Z"
 }
 ```
+
+---
+
+## Autenticación (`ADMIN`/`VALIDATOR`)
+
+Etapa 2 de autenticación y roles (ver `docs/DECISIONS.md`). Ambos endpoints requieren `Authorization: Bearer <Firebase ID Token>` — nunca hay sesión por cookie. **No protegen ni modifican ninguna ruta de negocio existente** (registro General, VIP, check-in, Mercado Pago siguen exactamente igual que antes) y **no interactúan con Mercado Pago** en ningún punto.
+
+### `GET /api/auth/me`
+
+Perfil mínimo del usuario autenticado, implementado en `backend/src/modules/auth/`. Protegido con `requireAuth` únicamente (cualquier `ADMIN`/`VALIDATOR` habilitado puede llamarlo).
+
+**Respuesta 200**
+
+```json
+{
+  "user": {
+    "id": "user-id-interno",
+    "firebaseUid": "firebase-uid",
+    "email": "admin@example.com",
+    "role": "ADMIN",
+    "status": "ACTIVE"
+  }
+}
+```
+
+Nunca devuelve el token, `displayName`, `phone`, `createdAt`/`updatedAt` ni ningún otro campo de `User` — solo estos 5.
+
+**Errores:** `401 UNAUTHORIZED` (sin header, esquema distinto de Bearer, token vacío/inválido/expirado/revocado, sin email, email no verificado, o sin `User` interno vinculado a ese `firebaseUid` — ver `requireAuth` en `docs/ARCHITECTURE.md`), `403 FORBIDDEN` (`User.status === "BLOCKED"`), `500 FIREBASE_NOT_CONFIGURED` (faltan las credenciales de Firebase Admin en el servidor — error de configuración, no del cliente).
+
+### `GET /api/auth/admin-check`
+
+**Solo técnica y temporal**, para validar `requireAuth` + `requireRole("ADMIN")` de punta a punta durante el desarrollo de esta etapa — no forma parte de ningún flujo de negocio. Protegido con `requireAuth` y `requireRole("ADMIN")`: cualquier otro rol (`VALIDATOR`, `USER`) recibe `403 FORBIDDEN`.
+
+**Respuesta 200**
+
+```json
+{ "ok": true, "message": "Admin access confirmed" }
+```
+
+**Errores:** mismos `401`/`403`/`500` que `GET /api/auth/me`, más `403 FORBIDDEN` si el rol no es `ADMIN`.
 
 ---
 

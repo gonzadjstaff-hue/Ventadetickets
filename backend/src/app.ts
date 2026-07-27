@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
 import { env } from "./config/env.js";
+import { authRouter } from "./modules/auth/routes.js";
 import { checkInRouter } from "./modules/check-in/routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { ordersRouter } from "./modules/orders/routes.js";
@@ -61,6 +62,13 @@ export function createApp(): Express {
       timestamp: new Date().toISOString(),
     });
   });
+
+  // Etapa 2 de autenticación (ver docs/DECISIONS.md): GET /me (perfil propio)
+  // y GET /admin-check (técnica/temporal, valida requireRole("ADMIN")).
+  // Sin flag: es infraestructura permanente, no un MVP temporal como
+  // check-in/simulador/Mercado Pago de abajo. No protege ninguna ruta de
+  // negocio existente — cada endpoint decide su propia protección.
+  app.use("/api/auth", authRouter);
 
   app.use("/api/events", registrationsRouter);
   app.use("/api/events", ordersRouter);

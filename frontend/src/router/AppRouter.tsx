@@ -10,6 +10,12 @@ import PulseEventLanding from "../pages/PulseEventLanding";
 // peso si nunca visita el check-in. Ver docs/DECISIONS.md.
 const CheckInPage = lazy(() => import("../pages/CheckInPage"));
 
+// Etapa 3 de autenticación (ver docs/DECISIONS.md): pantalla técnica/temporal
+// para validar login de Firebase + GET /api/auth/me, arrastra el SDK de
+// Firebase — mismo motivo para cargarla diferida que /check-in. No linkeada
+// desde la navegación pública, no protege ninguna ruta existente.
+const AuthDebugPage = lazy(() => import("../pages/AuthDebugPage"));
+
 export default function AppRouter() {
   return (
     <Routes>
@@ -22,6 +28,15 @@ export default function AppRouter() {
         element={
           <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#0C0C0C]" />}>
             <CheckInPage />
+          </Suspense>
+        }
+      />
+      {/* Técnica/temporal, no linkeada desde la navegación pública. Ver AuthDebugPage. */}
+      <Route
+        path="/auth-debug"
+        element={
+          <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#0C0C0C]" />}>
+            <AuthDebugPage />
           </Suspense>
         }
       />

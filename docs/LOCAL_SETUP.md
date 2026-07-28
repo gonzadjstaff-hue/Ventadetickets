@@ -156,7 +156,7 @@ Firebase Authentication es solo para administradores/validadores (ver `docs/DECI
 4. **Completar `frontend/.env`** con las 6 variables `VITE_FIREBASE_*` (ver "Configuración del proyecto → General → Tus apps" en Firebase Console — son públicas, van en el bundle del cliente, nunca son secretas por sí solas).
 5. **Levantar backend y frontend** (`npm run dev` en ambos, ver secciones 2 y 3 más arriba).
 6. **Abrir `http://localhost:5173/auth-debug`** — pantalla técnica, no linkeada desde la navegación pública (ver `docs/DECISIONS.md`).
-7. **Loguearse con el email/contraseña del paso 1** y confirmar que la pantalla muestra `email`/`role`/`status` — esa respuesta viene de `GET /api/auth/me` en el backend, validando el Firebase ID Token de punta a punta.
+7. **Loguearse con el email/contraseña del paso 1** y confirmar que la pantalla muestra `email`/`role`/`status` — esa respuesta viene de `POST /api/auth/session` (ver la sección siguiente para el flujo completo), no de `GET /api/auth/me`.
 
 Ninguna prueba manual real de este flujo se hizo todavía en este entorno — el script existe y está probado con tests unitarios de su lógica de validación (`backend/tests/createTestUserLogic.test.ts`), pero no se corrió contra ninguna base real ni se creó ningún usuario real en Firebase Console.
 
@@ -170,9 +170,14 @@ El paso 3 de arriba (`createTestUser.ts`) es un atajo de desarrollo: vincula el 
    STAFF_EMAIL=<email> STAFF_ROLE=ADMIN STAFF_DISPLAY_NAME="<nombre>" npm run auth:create-staff-user
    ```
 2. **Crear ese mismo email en Firebase Console** (paso 1 de arriba).
-3. **Primer login:** el cliente obtiene el Firebase ID Token y llama `POST /api/auth/session` con `Authorization: Bearer <token>` — recién ahí el backend vincula `firebaseUid` ↔ `User` (de forma atómica, con `AuditLog`). Logins siguientes pueden usar `GET /api/auth/me` directamente, ya vinculado.
-
-**Importante:** `/auth-debug` (frontend, Etapa 3) todavía llama únicamente a `GET /api/auth/me`, no a `POST /api/auth/session` — con este flujo "real" (sin pasar por `createTestUser.ts`), el primer login fallaría con 401 hasta que el frontend llame a `/session` antes de `/me`, o hasta probarlo directamente contra la API (`curl`/Postman) en vez de `/auth-debug`. Pendiente para una próxima etapa — ver `SESSION_HANDOFF.md`.
+3. **Primer login desde `/auth-debug`** — el frontend ya implementa este flujo completo de punta a punta:
+   1. Firebase inicia sesión (`loginWithEmail`).
+   2. El frontend obtiene el Firebase ID Token del usuario recién logueado.
+   3. Llama a `POST /api/auth/session` con `Authorization: Bearer <token>` (sin body: la única identidad que importa es la del token verificado, nunca datos que el frontend pudiera enviar).
+   4. El backend vincula `firebaseUid` al `User` preprovisionado si todavía está en `null` (de forma atómica, con `AuditLog`) — si ya estaba vinculado, resuelve la sesión sin volver a escribir nada.
+   5. La respuesta devuelve el perfil interno (`id`/`email`/`role`/`status`), que la pantalla muestra tal cual — nunca confía en un rol propio ni en datos enviados por el frontend.
+   6. En recargas de página (con la sesión de Firebase ya persistida por el SDK), el frontend vuelve a llamar `POST /api/auth/session` de forma idempotente para rehidratar el perfil — no hace falta ningún paso manual adicional.
+   7. `GET /api/auth/me` sigue disponible para validaciones puntuales posteriores (ya con la sesión vinculada), pero no forma parte del primer login: no lo bloquea ni hace falta llamarlo para que el login funcione.
 
 ## 8. Despliegue (Vercel + Render)
 

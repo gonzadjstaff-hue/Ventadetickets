@@ -1,15 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { getMe, type MeResponse } from "../api/auth";
-import { ApiError } from "../api/client";
 import { AuthProvider } from "../features/auth/AuthContext";
 import { useAuth } from "../features/auth/useAuth";
-
-type MeState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "success"; data: MeResponse["user"] }
-  | { status: "error"; message: string };
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -28,39 +20,10 @@ function AuthDebugScreen() {
     document.title = "Auth (técnico) — Pulse Event";
   }, []);
 
-  const { user, loading, configError, loginError, login, logout, getIdToken } = useAuth();
+  const { user, loading, configError, loginError, login, logout, profile, profileLoading, profileError } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [meState, setMeState] = useState<MeState>({ status: "idle" });
-
-  useEffect(() => {
-    // Sin usuario no hay nada que consultar — y la rama de render de "sin
-    // sesión" (más abajo) nunca lee `meState`, así que no hace falta
-    // resetearlo acá: cuando vuelva a haber usuario, este mismo efecto ya lo
-    // sobreescribe con "loading" antes de la próxima consulta.
-    if (!user) return;
-
-    let cancelled = false;
-
-    void (async () => {
-      setMeState({ status: "loading" });
-      try {
-        const token = await getIdToken();
-        if (!token) throw new Error("No se pudo obtener el ID Token.");
-        const response = await getMe(token);
-        if (!cancelled) setMeState({ status: "success", data: response.user });
-      } catch (error) {
-        if (cancelled) return;
-        const message = error instanceof ApiError ? error.message : "No pudimos validar la sesión contra el backend.";
-        setMeState({ status: "error", message });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, getIdToken]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -141,31 +104,31 @@ function AuthDebugScreen() {
     <Shell>
       <p className="text-sm text-[#AAB5BE]">Sesión de Firebase iniciada como {user.email ?? "—"}</p>
 
-      {meState.status === "loading" && (
+      {profileLoading && (
         <p role="status" className="text-sm text-[#AAB5BE]">
-          Validando sesión contra el backend…
+          Vinculando sesión con el backend…
         </p>
       )}
 
-      {meState.status === "error" && (
+      {profileError && (
         <p role="alert" className="max-w-sm text-center text-sm text-[#F87171]">
-          {meState.message}
+          {profileError}
         </p>
       )}
 
-      {meState.status === "success" && (
+      {profile && (
         <dl className="w-full max-w-sm space-y-2 text-sm text-[#E8EEF2]">
           <div className="flex justify-between gap-4">
             <dt className="text-[#AAB5BE]">Email</dt>
-            <dd>{meState.data.email}</dd>
+            <dd>{profile.email}</dd>
           </div>
           <div className="flex justify-between gap-4">
             <dt className="text-[#AAB5BE]">Rol</dt>
-            <dd>{meState.data.role}</dd>
+            <dd>{profile.role}</dd>
           </div>
           <div className="flex justify-between gap-4">
             <dt className="text-[#AAB5BE]">Estado</dt>
-            <dd>{meState.data.status}</dd>
+            <dd>{profile.status}</dd>
           </div>
         </dl>
       )}
@@ -183,10 +146,13 @@ function AuthDebugScreen() {
 
 /**
  * Pantalla técnica/temporal para validar de punta a punta login → ID Token →
- * GET /api/auth/me (ver docs/DECISIONS.md). No está en la navegación
- * pública, no protege ninguna ruta existente. AuthProvider se monta acá
- * mismo (no en main.tsx) para que este bloque quede completamente aislado:
- * nada de este código carga a menos que alguien visite /auth-debug.
+ * POST /api/auth/session (ver docs/DECISIONS.md). El perfil mostrado sale
+ * siempre del contexto (AuthProvider), que es quien llama a
+ * POST /api/auth/session y lo guarda — esta pantalla nunca confía en
+ * role/email propios, solo en lo que devuelve el backend. No está en la
+ * navegación pública, no protege ninguna ruta existente. AuthProvider se
+ * monta acá mismo (no en main.tsx) para que este bloque quede completamente
+ * aislado: nada de este código carga a menos que alguien visite /auth-debug.
  */
 export default function AuthDebugPage() {
   return (

@@ -8,14 +8,16 @@ import AuthDebugPage from "./AuthDebugPage";
 /**
  * Aislado por completo de servicios externos: ni el SDK de Firebase ni el
  * backend real se tocan. Se mockea `features/auth/authService` (login/logout/
- * ID Token) y `api/auth` (GET /api/auth/me) enteros.
+ * ID Token) y `api/auth` (createSession, POST /api/auth/session) enteros —
+ * `createSession` es invocado por AuthContext (montado dentro de
+ * AuthDebugPage), no por esta pantalla directamente.
  */
-const { subscribeToAuthStateMock, loginWithEmailMock, logoutMock, getIdTokenMock, getMeMock } = vi.hoisted(() => ({
+const { subscribeToAuthStateMock, loginWithEmailMock, logoutMock, getIdTokenMock, createSessionMock } = vi.hoisted(() => ({
   subscribeToAuthStateMock: vi.fn(),
   loginWithEmailMock: vi.fn(),
   logoutMock: vi.fn(),
   getIdTokenMock: vi.fn(),
-  getMeMock: vi.fn(),
+  createSessionMock: vi.fn(),
 }));
 
 vi.mock("../features/auth/authService", () => ({
@@ -27,12 +29,12 @@ vi.mock("../features/auth/authService", () => ({
 }));
 
 vi.mock("../api/auth", () => ({
-  getMe: getMeMock,
+  createSession: createSessionMock,
 }));
 
 const FAKE_USER = { uid: "uid-1", email: "admin@test.local" };
-const FAKE_ME_RESPONSE = {
-  user: { id: "user-1", firebaseUid: "uid-1", email: "admin@test.local", role: "ADMIN", status: "ACTIVE" },
+const FAKE_SESSION_RESPONSE = {
+  user: { id: "user-1", email: "admin@test.local", role: "ADMIN", status: "ACTIVE" },
 };
 
 async function submitLoginForm(user: ReturnType<typeof userEvent.setup>) {
@@ -58,7 +60,7 @@ describe("AuthDebugPage", () => {
     expect(screen.getByLabelText(/contraseña/i)).toBeInTheDocument();
   });
 
-  it("login exitoso: llama a loginWithEmail y, tras autenticar, consulta GET /api/auth/me con el Bearer token", async () => {
+  it("login exitoso: llama a loginWithEmail y, tras autenticar, vincula la sesión vía POST /api/auth/session con el Bearer token", async () => {
     let emitUser: ((user: unknown) => void) | undefined;
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       emitUser = callback;
@@ -70,7 +72,7 @@ describe("AuthDebugPage", () => {
       return FAKE_USER;
     });
     getIdTokenMock.mockResolvedValue("id-token-abc");
-    getMeMock.mockResolvedValue(FAKE_ME_RESPONSE);
+    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
 
     const user = userEvent.setup();
     render(<AuthDebugPage />);
@@ -81,10 +83,10 @@ describe("AuthDebugPage", () => {
     expect(loginWithEmailMock).toHaveBeenCalledWith("admin@test.local", "secret123");
     expect(await screen.findByText("ADMIN")).toBeInTheDocument();
     expect(screen.getByText("ACTIVE")).toBeInTheDocument();
-    expect(getMeMock).toHaveBeenCalledWith("id-token-abc");
+    expect(createSessionMock).toHaveBeenCalledWith("id-token-abc");
   });
 
-  it("error de login: muestra un mensaje claro y nunca llama a GET /api/auth/me", async () => {
+  it("error de login: muestra un mensaje claro y nunca llama a POST /api/auth/session", async () => {
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       callback(null);
       return () => {};
@@ -98,10 +100,14 @@ describe("AuthDebugPage", () => {
     await submitLoginForm(user);
 
     expect(await screen.findByText(/email o contraseña incorrectos/i)).toBeInTheDocument();
-    expect(getMeMock).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
   });
 
-  it("error 401 del backend en GET /api/auth/me: muestra el mensaje de error sin romper la pantalla", async () => {
+  it.each([
+    [401, "No autorizado."],
+    [403, "No tenés permisos para realizar esta acción."],
+    [409, "Esta cuenta ya está vinculada a otro usuario de Firebase."],
+  ])("error %i de POST /api/auth/session: muestra el mensaje sin romper la pantalla", async (status, message) => {
     let emitUser: ((user: unknown) => void) | undefined;
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       emitUser = callback;
@@ -113,7 +119,7 @@ describe("AuthDebugPage", () => {
       return FAKE_USER;
     });
     getIdTokenMock.mockResolvedValue("id-token-abc");
-    getMeMock.mockRejectedValue(new ApiError(401, "No autorizado.", "UNAUTHORIZED"));
+    createSessionMock.mockRejectedValue(new ApiError(status, message, "SOME_CODE"));
 
     const user = userEvent.setup();
     render(<AuthDebugPage />);
@@ -121,10 +127,24 @@ describe("AuthDebugPage", () => {
 
     await submitLoginForm(user);
 
-    expect(await screen.findByText("No autorizado.")).toBeInTheDocument();
+    expect(await screen.findByText(message)).toBeInTheDocument();
   });
 
-  it("logout: llama al servicio de logout y vuelve a mostrar el formulario de login", async () => {
+  it("recarga con usuario Firebase existente: rehidrata la sesión automáticamente, sin pasar por el formulario de login", async () => {
+    subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
+      callback(FAKE_USER);
+      return () => {};
+    });
+    getIdTokenMock.mockResolvedValue("id-token-abc");
+    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
+
+    render(<AuthDebugPage />);
+
+    expect(await screen.findByText("ADMIN")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+  });
+
+  it("logout: llama al servicio de logout, limpia el perfil y vuelve a mostrar el formulario de login", async () => {
     let emitUser: ((user: unknown) => void) | undefined;
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       emitUser = callback;
@@ -132,7 +152,7 @@ describe("AuthDebugPage", () => {
       return () => {};
     });
     getIdTokenMock.mockResolvedValue("id-token-abc");
-    getMeMock.mockResolvedValue(FAKE_ME_RESPONSE);
+    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
     logoutMock.mockImplementation(async () => {
       emitUser?.(null);
     });
@@ -159,7 +179,7 @@ describe("AuthDebugPage", () => {
       return FAKE_USER;
     });
     getIdTokenMock.mockResolvedValue("token-super-secreto-xyz");
-    getMeMock.mockResolvedValue(FAKE_ME_RESPONSE);
+    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
 
     const user = userEvent.setup();
     render(<AuthDebugPage />);

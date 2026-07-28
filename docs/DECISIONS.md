@@ -26,6 +26,14 @@ Etapa 1 de autenticación y roles (`backend/src/integrations/firebase/firebaseAd
 - **Un único mensaje/código genérico para todas las causas de 401** (header ausente, esquema distinto de Bearer, token vacío, rechazado por Firebase, expirado, revocado, sin email, email no verificado, sin `User` vinculado): a propósito, para no darle a quien intenta autenticarse ninguna pista de cuál fue la causa exacta.
 - **La inicialización de Firebase Admin es perezosa**, no al importar el módulo: importar `firebaseAdmin.ts` no tiene efecto secundario (no llama a `initializeApp`), así que el backend arranca igual sin credenciales configuradas, y los tests importan el módulo sin necesitar credenciales reales.
 
+## `backend/scripts/createTestUser.ts` upsertea por `email`, no por `firebaseUid`
+
+Etapa 4 de autenticación (`docs/LOCAL_SETUP.md`, sección 7). El script recibe `FIREBASE_UID`/`USER_EMAIL`/`USER_ROLE`/`USER_STATUS` y hace `prisma.user.upsert({ where: { email } })` — a propósito, no `where: { firebaseUid }`. Motivo: `email` es la clave que un operador humano ya conoce de antemano (la de la cuenta que acaba de crear en Firebase Console), y permite completar el `firebaseUid` de un `User` preprovisionado que todavía no lo tenía (mismo escenario que `requireAuth` espera, ver más arriba) sin duplicar la fila.
+
+Esto **no** es la vinculación automática por email que `requireAuth` explícitamente no hace (ver la entrada de arriba) — es un paso manual y explícito, ejecutado a propósito por un humano con las 4 variables en la mano, no algo que el backend infiera solo a partir de un token. `POST /api/auth/session`, cuando se implemente, seguirá siendo el único mecanismo de vinculación automática en tiempo de request.
+
+Antes de escribir nada, el script consulta si el `firebaseUid` recibido ya pertenece a otro `email` (`describeFirebaseUidConflict()`, función pura en `createTestUserLogic.ts`) y corta con un mensaje claro si es así — sin este chequeo, el upsert por `email` fallaría recién en el momento de escribir con un error crudo de Postgres (`firebaseUid` es `@unique`), sin explicar la causa real.
+
 ## `TicketType.id` se usa provisionalmente como identificador público en la API
 
 El body de `POST /api/events/:eventPublicId/registrations/general` pide `ticketTypeId`, y ese valor es el `id` interno de Prisma (la primary key, un cuid), **no** un campo `publicId` separado — porque `TicketType` no tiene esa columna, a diferencia de `Event`, `Order` y `Ticket`.

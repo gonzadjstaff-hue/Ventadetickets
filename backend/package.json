@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:db:setup": "tsx scripts/prepare-test-db.ts",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "auth:create-test-user": "tsx scripts/createTestUser.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

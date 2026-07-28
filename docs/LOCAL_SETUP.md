@@ -50,7 +50,7 @@ Completar en `backend/.env` como mínimo:
 | `APP_PUBLIC_URL` | URL pública HTTPS del frontend (sin barra final) — se usa para las `back_urls` del checkout. En local hace falta un túnel (ver paso 6). |
 | `BACKEND_PUBLIC_URL` | URL pública HTTPS del backend (sin barra final) — se usa para el `notification_url` del webhook. En local hace falta un túnel. |
 
-Firebase, `MERCADOPAGO_PUBLIC_KEY`, `MERCADOPAGO_API_BASE_URL` y `QR_SIGNING_SECRET` todavía no se usan en ningún código: pueden quedar vacías (ver `docs/DECISIONS.md` para por qué, en el caso de Mercado Pago).
+`MERCADOPAGO_PUBLIC_KEY`, `MERCADOPAGO_API_BASE_URL` y `QR_SIGNING_SECRET` todavía no se usan en ningún código: pueden quedar vacías (ver `docs/DECISIONS.md` para por qué, en el caso de Mercado Pago). **Firebase sí se usa** desde la Etapa 1 de autenticación (`ADMIN`/`VALIDATOR` únicamente, nunca para compradores/asistentes) — ver la sección 8 más abajo para completar `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` y probarlo de punta a punta.
 
 ```bash
 npm install   # dispara automáticamente "prisma generate" (script postinstall)
@@ -141,6 +141,25 @@ No se incluyen pasos automáticos para exponer `localhost` (instalar/configurar 
 
 Verificado con tests automatizados (backend y frontend, con el proveedor mockeado — ver `docs/PROGRESS.md`); **ninguna prueba manual real contra la API de Mercado Pago todavía** — no hay credenciales de prueba ni URL pública configuradas en este entorno.
 
-## 7. Despliegue (Vercel + Render)
+## 7. Probar el login de Firebase (ADMIN/VALIDATOR)
+
+Firebase Authentication es solo para administradores/validadores (ver `docs/DECISIONS.md`) — nunca para compradores/asistentes, que siguen registrándose sin cuenta. El procedimiento manual completo, de punta a punta:
+
+1. **Crear un usuario en Firebase Console** — en el proyecto de Firebase correspondiente, "Authentication → Users → Add user", con un email y contraseña de prueba (nunca una cuenta ni una contraseña real).
+2. **Copiar el UID** del usuario recién creado (columna "User UID" en la lista de usuarios).
+3. **Ejecutar el script del backend** con las 4 variables de entorno (nunca hardcodeadas en el script ni en ningún archivo versionado):
+   ```bash
+   cd backend
+   FIREBASE_UID=<uid_copiado> USER_EMAIL=<mismo_email_de_firebase> USER_ROLE=ADMIN USER_STATUS=ACTIVE npm run auth:create-test-user
+   ```
+   `USER_ROLE` es obligatoria (`USER`/`VALIDATOR`/`ADMIN`); `USER_STATUS` es opcional, default `ACTIVE`. El script inserta o actualiza (por `email`) un `User` en Postgres con ese `firebaseUid`/`role`/`status`, e imprime el registro resultante — nunca borra nada ni toca otras tablas. Si el `firebaseUid` ya está asignado a otro `email`, corta antes de escribir nada y explica el conflicto.
+4. **Completar `frontend/.env`** con las 6 variables `VITE_FIREBASE_*` (ver "Configuración del proyecto → General → Tus apps" en Firebase Console — son públicas, van en el bundle del cliente, nunca son secretas por sí solas).
+5. **Levantar backend y frontend** (`npm run dev` en ambos, ver secciones 2 y 3 más arriba).
+6. **Abrir `http://localhost:5173/auth-debug`** — pantalla técnica, no linkeada desde la navegación pública (ver `docs/DECISIONS.md`).
+7. **Loguearse con el email/contraseña del paso 1** y confirmar que la pantalla muestra `email`/`role`/`status` — esa respuesta viene de `GET /api/auth/me` en el backend, validando el Firebase ID Token de punta a punta.
+
+Ninguna prueba manual real de este flujo se hizo todavía en este entorno — el script existe y está probado con tests unitarios de su lógica de validación (`backend/tests/createTestUserLogic.test.ts`), pero no se corrió contra ninguna base real ni se creó ningún usuario real en Firebase Console.
+
+## 8. Despliegue (Vercel + Render)
 
 Este documento cubre únicamente el entorno **local**. Para desplegar el frontend en Vercel, el backend en Render y una base PostgreSQL administrada en Render (incluyendo Mercado Pago contra la URL pública estable del backend en vez de un túnel), ver la guía paso a paso completa en [`docs/DEPLOYMENT.md`](./DEPLOYMENT.md) — nada de eso está desplegado todavía.

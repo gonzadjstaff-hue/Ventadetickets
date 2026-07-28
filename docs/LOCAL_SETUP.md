@@ -160,6 +160,20 @@ Firebase Authentication es solo para administradores/validadores (ver `docs/DECI
 
 Ninguna prueba manual real de este flujo se hizo todavía en este entorno — el script existe y está probado con tests unitarios de su lógica de validación (`backend/tests/createTestUserLogic.test.ts`), pero no se corrió contra ninguna base real ni se creó ningún usuario real en Firebase Console.
 
+### Alternativa: flujo "real" de preprovisión + primer login (`POST /api/auth/session`)
+
+El paso 3 de arriba (`createTestUser.ts`) es un atajo de desarrollo: vincula el `firebaseUid` directamente, sin pasar por `POST /api/auth/session`. El flujo pensado para producción es distinto (ver `docs/DECISIONS.md`):
+
+1. **Preprovisionar el `User` en Postgres, sin `firebaseUid`:**
+   ```bash
+   cd backend
+   STAFF_EMAIL=<email> STAFF_ROLE=ADMIN STAFF_DISPLAY_NAME="<nombre>" npm run auth:create-staff-user
+   ```
+2. **Crear ese mismo email en Firebase Console** (paso 1 de arriba).
+3. **Primer login:** el cliente obtiene el Firebase ID Token y llama `POST /api/auth/session` con `Authorization: Bearer <token>` — recién ahí el backend vincula `firebaseUid` ↔ `User` (de forma atómica, con `AuditLog`). Logins siguientes pueden usar `GET /api/auth/me` directamente, ya vinculado.
+
+**Importante:** `/auth-debug` (frontend, Etapa 3) todavía llama únicamente a `GET /api/auth/me`, no a `POST /api/auth/session` — con este flujo "real" (sin pasar por `createTestUser.ts`), el primer login fallaría con 401 hasta que el frontend llame a `/session` antes de `/me`, o hasta probarlo directamente contra la API (`curl`/Postman) en vez de `/auth-debug`. Pendiente para una próxima etapa — ver `SESSION_HANDOFF.md`.
+
 ## 8. Despliegue (Vercel + Render)
 
 Este documento cubre únicamente el entorno **local**. Para desplegar el frontend en Vercel, el backend en Render y una base PostgreSQL administrada en Render (incluyendo Mercado Pago contra la URL pública estable del backend en vez de un túnel), ver la guía paso a paso completa en [`docs/DEPLOYMENT.md`](./DEPLOYMENT.md) — nada de eso está desplegado todavía.

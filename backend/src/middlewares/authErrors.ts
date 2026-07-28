@@ -23,3 +23,16 @@ export class ForbiddenError extends AppError {
     super("FORBIDDEN", "No tenés permisos para realizar esta acción.", 403);
   }
 }
+
+/**
+ * Un `User` preprovisionado por email ya tiene un `firebaseUid` distinto al
+ * del token que se está intentando vincular (`POST /api/auth/session`, caso
+ * B) — nunca se reemplaza un `firebaseUid` existente automáticamente. El
+ * mensaje es genérico a propósito: no menciona el otro `firebaseUid` ni a
+ * qué cuenta de Firebase pertenece.
+ */
+export class FirebaseUidConflictError extends AppError {
+  constructor() {
+    super("FIREBASE_UID_CONFLICT", "Esta cuenta ya está vinculada a otro usuario de Firebase.", 409);
+  }
+}

@@ -23,7 +23,39 @@ Endpoint de salud, sin lógica de negocio.
 
 ## Autenticación (`ADMIN`/`VALIDATOR`)
 
-Etapa 2 de autenticación y roles (ver `docs/DECISIONS.md`). Ambos endpoints requieren `Authorization: Bearer <Firebase ID Token>` — nunca hay sesión por cookie. **No protegen ni modifican ninguna ruta de negocio existente** (registro General, VIP, check-in, Mercado Pago siguen exactamente igual que antes) y **no interactúan con Mercado Pago** en ningún punto.
+Etapas 2 y 5 de autenticación y roles (ver `docs/DECISIONS.md`). Los tres endpoints requieren `Authorization: Bearer <Firebase ID Token>` — nunca hay sesión por cookie. **No protegen ni modifican ninguna ruta de negocio existente** (registro General, VIP, check-in, Mercado Pago siguen exactamente igual que antes) y **no interactúan con Mercado Pago** en ningún punto.
+
+### `POST /api/auth/session`
+
+Primer acceso (vinculación `firebaseUid` ↔ `User`) o acceso normal de un `ADMIN`/`VALIDATOR` **previamente preprovisionado** en Postgres (ver `backend/scripts/createStaffUser.ts` más abajo). Implementado en `backend/src/modules/auth/sessionService.ts`. No usa `requireAuth` — a propósito, porque `requireAuth` exige que el `User` ya esté vinculado, que es exactamente el caso que este endpoint resuelve. Verifica el token igual que `requireAuth` (mismo helper, `verifyBearerFirebaseToken`), pero no requiere ningún `body` — cualquier `email`/`role`/`firebaseUid` que venga en el body se ignora por completo, la única identidad que importa es la del token verificado.
+
+**Body:** ninguno requerido (puede ir vacío).
+
+**Respuesta 200**
+
+```json
+{
+  "user": {
+    "id": "user-id-interno",
+    "email": "admin@example.com",
+    "role": "ADMIN",
+    "status": "ACTIVE"
+  }
+}
+```
+
+Nunca devuelve `firebaseUid`, el token, `displayName`, `phone`, `createdAt`/`updatedAt` ni ningún otro campo — solo estos 4.
+
+**Flujo:**
+1. Verifica el token (mismo criterio que `requireAuth`: email presente + verificado).
+2. Busca un `User` por `firebaseUid`. Si existe y está `ACTIVE`, responde 200 directo (no escribe nada).
+3. Si está `BLOCKED`, `403`.
+4. Si no existe por `firebaseUid`, busca por `email` normalizado (minúsculas, recortado). Si no existe ningún `User` con ese email, `401` (nunca se crea un usuario nuevo acá — no hay registro público de `ADMIN`/`VALIDATOR`).
+5. Si el `User` encontrado por email está `BLOCKED`, `403`.
+6. Si ya tiene un `firebaseUid` distinto asignado, `409` (nunca se reemplaza un `firebaseUid` existente automáticamente).
+7. Si tiene `firebaseUid: null`, lo vincula de forma atómica (`updateMany` condicionado, mismo patrón que la aprobación de pago/check-in) dentro de una transacción que también crea un `AuditLog` (`action: "STAFF_FIREBASE_UID_LINKED"`, sin el `firebaseUid` completo ni el token en `metadata`). Dos requests concurrentes con el mismo token nunca duplican el `AuditLog` ni fallan entre sí.
+
+**Errores:** `401 UNAUTHORIZED` (mismas causas que `GET /api/auth/me`, más "no existe ningún `User` preprovisionado con ese email"), `403 FORBIDDEN` (`User.status === "BLOCKED"`), `409 FIREBASE_UID_CONFLICT` (el `User` de ese email ya está vinculado a otra cuenta de Firebase — el mensaje nunca menciona cuál), `500 FIREBASE_NOT_CONFIGURED`.
 
 ### `GET /api/auth/me`
 

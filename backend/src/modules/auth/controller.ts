@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 
 import { UnauthorizedError } from "../../middlewares/authErrors.js";
+import { verifyBearerFirebaseToken } from "../../middlewares/verifyBearerFirebaseToken.js";
+import { resolveOrLinkStaffUser } from "./sessionService.js";
 
 /**
  * Devuelve el perfil mínimo del usuario autenticado. Todo sale de
@@ -31,4 +33,25 @@ export function getMe(req: Request, res: Response, next: NextFunction): void {
  */
 export function getAdminCheck(_req: Request, res: Response): void {
   res.status(200).json({ ok: true, message: "Admin access confirmed" });
+}
+
+/**
+ * Primer acceso (o acceso normal, si ya estaba vinculado) de un ADMIN/
+ * VALIDATOR previamente autorizado en Postgres. No usa requireAuth: a
+ * propósito, porque requireAuth exige que el `User` ya esté vinculado por
+ * `firebaseUid`, que es exactamente el caso que este endpoint tiene que
+ * poder resolver (ver sessionService.ts). Nunca lee `req.body` — la única
+ * identidad que importa es la que sale del token verificado.
+ */
+export async function postSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { uid, email } = await verifyBearerFirebaseToken(req);
+    const user = await resolveOrLinkStaffUser({ firebaseUid: uid, email });
+
+    res.status(200).json({
+      user: { id: user.id, email: user.email, role: user.role, status: user.status },
+    });
+  } catch (error) {
+    next(error);
+  }
 }

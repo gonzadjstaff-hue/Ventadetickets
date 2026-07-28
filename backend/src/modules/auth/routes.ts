@@ -2,9 +2,14 @@ import { Router } from "express";
 
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { requireRole } from "../../middlewares/requireRole.js";
-import { getAdminCheck, getMe } from "./controller.js";
+import { getAdminCheck, getMe, postSession } from "./controller.js";
 
 export const authRouter = Router();
+
+// Sin requireAuth a propósito: resuelve el primer acceso (vinculación
+// firebaseUid ↔ User) además del acceso normal — ver postSession en
+// controller.ts y docs/DECISIONS.md.
+authRouter.post("/session", postSession);
 
 authRouter.get("/me", requireAuth, getMe);
 

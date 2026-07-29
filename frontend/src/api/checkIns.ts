@@ -11,9 +11,11 @@ export interface CheckInResponse {
   ticketType?: string;
 }
 
-export function postCheckIn(eventPublicId: string, qrPayload: string): Promise<CheckInResponse> {
+/** Requiere un Firebase ID Token vigente del validador/admin logueado (ver features/auth/). Nunca cachea ni persiste el token. */
+export function postCheckIn(eventPublicId: string, qrPayload: string, idToken: string): Promise<CheckInResponse> {
   return apiFetch<CheckInResponse>(`/api/events/${eventPublicId}/check-ins`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ qrPayload }),
   });
 }

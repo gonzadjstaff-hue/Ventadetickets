@@ -51,7 +51,7 @@ export default function StaffLoginPage() {
   }, []);
 
   const navigate = useNavigate();
-  const { user, profile, loading, profileError, loginError, login, logout } = useAuth();
+  const { user, profile, loading, configError, profileError, loginError, login, logout } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -100,6 +100,21 @@ export default function StaffLoginPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Firebase no está configurado (faltan las VITE_FIREBASE_*) — se muestra
+  // antes que cualquier otro estado, con el mensaje real. Sin este chequeo,
+  // el formulario de login se renderiza igual y cualquier intento de
+  // loguearse termina mostrando el mensaje genérico de "credenciales
+  // incorrectas" (mapFirebaseAuthError no reconoce FirebaseNotConfiguredError,
+  // que no tiene `.code`), ocultando la causa real. Mismo criterio que
+  // AuthDebugPage.tsx.
+  if (configError) {
+    return (
+      <FullScreenStatus role="alert">
+        {configError}
+      </FullScreenStatus>
+    );
   }
 
   if (loading) {

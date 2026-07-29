@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import { AuthProvider } from "../features/auth/AuthContext";
+import { FirebaseNotConfiguredError } from "../features/auth/firebaseClient";
 import StaffLoginPage from "./StaffLoginPage";
 
 /**
@@ -77,6 +78,19 @@ describe("StaffLoginPage", () => {
 
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Contraseña")).toBeInTheDocument();
+  });
+
+  it("Firebase no configurado (faltan las VITE_FIREBASE_*): muestra el error real, no el formulario ni un mensaje de credenciales", async () => {
+    subscribeToAuthStateMock.mockImplementation(() => {
+      throw new FirebaseNotConfiguredError();
+    });
+
+    renderPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/firebase no está configurado/i);
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/email o contraseña incorrectos/i)).not.toBeInTheDocument();
   });
 
   it("login ADMIN: redirige a /admin", async () => {

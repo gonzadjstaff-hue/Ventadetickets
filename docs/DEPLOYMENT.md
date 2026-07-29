@@ -7,7 +7,7 @@ Guía manual, paso a paso, para la arquitectura elegida:
 - **Base de datos** → **PostgreSQL administrado en Render**.
 - **Mercado Pago Checkout Pro** → contra la URL pública estable del backend en Render (ya no un túnel de desarrollo).
 
-**Nada de esto está desplegado todavía.** Esta guía no ejecuta ningún despliegue por sí sola — cada paso se hace a mano, con tus propias cuentas de Render/Vercel/Mercado Pago. No contiene credenciales reales; donde hace falta un valor propio, se indica entre `<...>`.
+**Actualización (2026-07-29): el backend y el frontend SÍ están desplegados** (Render "Live" y Vercel "Ready", commit `4bf9de1` en ambos, confirmado manualmente por Gonzalo — ver `SESSION_HANDOFF.md`, sección 21). El resto de esta guía describe el procedimiento paso a paso tal como se siguió (o debería seguirse) para llegar a ese estado — no asumas que un paso puntual (ej. las variables de Firebase, ver el paso 5 y el paso 10) ya se completó solo porque el servicio esté Live: un backend puede estar Live y con Postgres conectado mientras una integración puntual (Firebase, Mercado Pago) sigue sin sus credenciales cargadas, sin que eso afecte el estado general del deploy. Esta guía no ejecuta ningún despliegue por sí sola — cada paso se hace a mano, con tus propias cuentas de Render/Vercel/Mercado Pago. No contiene credenciales reales; donde hace falta un valor propio, se indica entre `<...>`.
 
 Antes de arrancar, confirmar en local que build/lint/test siguen en verde (ver `docs/PROGRESS.md` para el último resultado registrado) y que `backend/.env`/`frontend/.env` (con credenciales/valores locales) **nunca** se suben a git — ya están en `.gitignore` en la raíz, en `backend/` y en `frontend/`.
 
@@ -60,6 +60,11 @@ En la pestaña **Environment** del Web Service, cargar (ver la tabla completa en
 | `ENABLE_MVP_CHECKIN` | `false` (o no cargarla) |
 | `ENABLE_MVP_PAYMENT_SIMULATOR` | `false` (o no cargarla) |
 | `ENABLE_MERCADOPAGO_CHECKOUT` | `false` por ahora — se activa recién en el paso 16 |
+| `FIREBASE_PROJECT_ID` | Del proyecto de Firebase (Configuración del proyecto → General) |
+| `FIREBASE_CLIENT_EMAIL` | Del JSON de la cuenta de servicio (Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada) |
+| `FIREBASE_PRIVATE_KEY` | Del mismo JSON — pegar tal cual, con `\n` literales; el backend la normaliza a saltos de línea reales (`backend/src/integrations/firebase/firebaseAdmin.ts`) |
+
+**Las 3 `FIREBASE_*` son necesarias para que el login de staff (`/staff/login`, `ADMIN`/`VALIDATOR`) funcione, independientemente de si Mercado Pago está activado.** Sin ellas, el backend arranca igual y `GET /api/health` responde `ok` de todos modos (inicialización perezosa) — pero `POST /api/auth/session` (y por lo tanto todo el login) falla con `500 FIREBASE_NOT_CONFIGURED` en el 100% de los intentos, sin que eso se refleje en el health check. Verificación segura una vez desplegado, sin exponer ningún secreto: `curl -X POST https://<tu-backend>.onrender.com/api/auth/session -H "Authorization: Bearer test"` — `500 FIREBASE_NOT_CONFIGURED` indica que faltan estas variables; `401 UNAUTHORIZED` confirma que están cargadas (el token "test" es simplemente inválido, comportamiento esperado).
 
 El resto de las variables de Mercado Pago (`MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `APP_PUBLIC_URL`, `BACKEND_PUBLIC_URL`) se completan en los pasos 13-16, cuando ya existan las URLs finales.
 
@@ -104,8 +109,11 @@ Respuesta esperada: `{ "status": "ok", "timestamp": "..." }`. Este es también e
 |---|---|
 | `VITE_API_URL` | `https://<tu-backend>.onrender.com` (la URL del Web Service del paso 2, **sin** `/api` al final — ver `docs/LOCAL_SETUP.md`) |
 | `VITE_DEMO_EVENT_PUBLIC_ID`, `VITE_DEMO_GENERAL_TICKET_TYPE_ID`, `VITE_DEMO_VIP_INDIVIDUAL_TICKET_TYPE_ID`, `VITE_DEMO_VIP_DOBLE_TICKET_TYPE_ID` | Los mismos IDs que en desarrollo (creados por `backend/prisma/seed.ts`) si se corrió el seed contra la base de Render; si no, no hay evento para mostrar en la landing — ver el paso 6 |
+| `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` | Los mismos valores públicos que en desarrollo (Firebase Console → Configuración del proyecto → Tus apps) — ver `docs/LOCAL_SETUP.md`, sección 8 |
 
 `VITE_API_URL` es una variable de **build time** de Vite: si se cambia, hace falta un redeploy en Vercel para que el nuevo valor quede incluido en el bundle (no es una variable que el navegador lea en runtime). El repo no usa el nombre `VITE_API_BASE_URL` — se mantuvo `VITE_API_URL`, el nombre ya existente en `frontend/src/api/client.ts` y documentado en `docs/LOCAL_SETUP.md`, para no renombrar una variable ya en uso sin necesidad funcional (ver `docs/DECISIONS.md`). Configurala con ese nombre exacto en Vercel.
+
+**Las 6 `VITE_FIREBASE_*` son igual de necesarias que `VITE_API_URL` para que `/staff/login` funcione** — son de build time igual que ella (Vite las inlinea en el bundle en tiempo de build), así que un cambio también exige redeploy. Cargalas en los tres entornos de Vercel (Production, Preview y Development). Son valores públicos de configuración de cliente (no secretos), pero **si falta una sola, las 6 se tratan como ausentes**: el SDK de Firebase no inicializa, y sin el fix de `frontend/src/pages/StaffLoginPage.tsx` (lee `configError` del contexto) el usuario vería un mensaje de "credenciales incorrectas" en vez del error real — verificado y corregido en el código, ver `docs/DECISIONS.md`.
 
 Ninguna variable de Mercado Pago (`MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `MERCADOPAGO_PUBLIC_KEY`) se carga en Vercel — el frontend nunca las usa ni las necesita (ver [Mercado Pago en el entorno desplegado](#mercado-pago-en-el-entorno-desplegado)).
 
@@ -203,7 +211,8 @@ Desde `https://<tu-frontend>.vercel.app` (no localhost): elegir VIP, completar c
 | `MERCADOPAGO_REQUEST_TIMEOUT_MS` | No | Default `8000`. |
 | `APP_PUBLIC_URL` | Solo si se activa Mercado Pago | URL de Vercel, sin barra final (paso 13). |
 | `BACKEND_PUBLIC_URL` | Solo si se activa Mercado Pago | URL de Render, sin barra final (paso 13). |
-| `QR_SIGNING_SECRET`, `FIREBASE_*` | No | No usadas por ningún código todavía — pueden quedar vacías. |
+| `QR_SIGNING_SECRET` | No | No usada por ningún código todavía — puede quedar vacía. |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | **Sí, para que el login de staff funcione** (aunque no rompen el arranque del backend si faltan) | Cuenta de servicio de Firebase Admin SDK — ver el paso 5 más arriba. Corrección: una versión anterior de esta tabla decía incorrectamente que no se usaban; sí están completamente wireadas desde la Etapa 1 de autenticación (`backend/src/integrations/firebase/`, `requireAuth.ts`, `modules/auth/`). |
 
 ---
 
@@ -261,7 +270,7 @@ Auditado sobre el código ya existente más los cambios de este bloque — solo 
 
 ## Riesgos y pendientes
 
-- **Ninguna prueba manual real contra Mercado Pago todavía** (ni local ni desplegada) — sigue pendiente confirmar de punta a punta con credenciales de prueba reales, este es exactamente el objetivo de los pasos 14-18.
+- **Estado real de las pruebas contra Mercado Pago: contradictorio entre documentos, sin resolver.** Esta sección decía "ninguna prueba manual real todavía", pero `docs/DECISIONS.md` (secciones "Diagnóstico de producción..." y "`SignatureMismatch` en producción...") describe evidencia concreta de un webhook real recibido en producción (`dataId=170718289792`, logs de Render). No se resolvió cuál de las dos es la afirmación vigente en esta sesión — ver `SESSION_HANDOFF.md` sección 21.6/14 para el detalle. Confirmar con Gonzalo y actualizar esta sección en consecuencia antes de asumir cualquiera de las dos.
 - **`render.yaml`** (raíz del repo) es un punto de partida opcional, no verificado importándolo de verdad como Blueprint en esta sesión — revisar sus nombres de campo contra la documentación vigente de Render antes de usarlo; la vía principal y más robusta es la configuración manual paso a paso de esta guía.
 - **Cron de expiración de órdenes** sigue pendiente (expiración perezosa, ver `docs/ROADMAP.md`) — no es un bloqueante para desplegar, pero una orden `PENDING` vencida solo se limpia cuando algo la consulta.
 - **Conexiones de Postgres bajo carga real** no probadas contra un plan específico de Render — ver la nota de connection pooling en [Base de datos](#base-de-datos) si aparece en el futuro.

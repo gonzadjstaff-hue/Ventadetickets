@@ -58,6 +58,18 @@ services:
         sync: false
       - key: MERCADOPAGO_WEBHOOK_SECRET
         sync: false
+      # Firebase Admin SDK (Etapa 1 de autenticación) — necesarias para que el
+      # login de staff (/staff/login, ADMIN/VALIDATOR) funcione. Sin ellas el
+      # backend arranca igual (inicialización perezosa) y GET /api/health
+      # sigue respondiendo ok, pero POST /api/auth/session falla siempre con
+      # 500 FIREBASE_NOT_CONFIGURED — ver docs/DEPLOYMENT.md paso 5 y
+      # SESSION_HANDOFF.md sección 21.3. Cargar a mano en el dashboard.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
       # Opcional (ver docs/LOCAL_SETUP.md) — dejar sin cargar si no se usa envío real de email:
       - key: EMAIL_PROVIDER
         sync: false

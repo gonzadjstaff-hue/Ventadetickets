@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 
+import ProtectedRoute from "../features/auth/ProtectedRoute";
 import CheckoutReturnPage from "../pages/CheckoutReturnPage";
 import PulseEventLanding from "../pages/PulseEventLanding";
 
@@ -11,10 +12,20 @@ import PulseEventLanding from "../pages/PulseEventLanding";
 const CheckInPage = lazy(() => import("../pages/CheckInPage"));
 
 // Etapa 3 de autenticación (ver docs/DECISIONS.md): pantalla técnica/temporal
-// para validar login de Firebase + GET /api/auth/me, arrastra el SDK de
-// Firebase — mismo motivo para cargarla diferida que /check-in. No linkeada
-// desde la navegación pública, no protege ninguna ruta existente.
+// para validar login de Firebase + POST /api/auth/session, no linkeada desde
+// la navegación pública, no protege ninguna ruta existente. Distinta de
+// /staff/login (login real).
 const AuthDebugPage = lazy(() => import("../pages/AuthDebugPage"));
+
+// Login real de staff (ADMIN/VALIDATOR) y panel administrativo — cargados
+// diferidos por el mismo motivo que arriba: la landing pública no debe pagar
+// el peso de Firebase ni del dashboard si nunca los visita.
+const StaffLoginPage = lazy(() => import("../pages/StaffLoginPage"));
+const AdminDashboardPage = lazy(() => import("../pages/AdminDashboardPage"));
+
+function PageLoadingFallback() {
+  return <div className="flex min-h-screen items-center justify-center bg-[#0C0C0C]" />;
+}
 
 export default function AppRouter() {
   return (
@@ -22,20 +33,46 @@ export default function AppRouter() {
       <Route path="/" element={<PulseEventLanding />} />
       {/* Pública: destino de las back_urls de Checkout Pro. Sin dependencias pesadas, no se carga diferida. Ver CheckoutReturnPage. */}
       <Route path="/checkout/return" element={<CheckoutReturnPage />} />
-      {/* MVP sin autenticación, no linkeada desde la navegación pública. Ver CheckInPage. */}
+
+      {/* Login real de staff — no linkeada desde la navegación pública de compradores/asistentes. */}
       <Route
-        path="/check-in"
+        path="/staff/login"
         element={
-          <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#0C0C0C]" />}>
-            <CheckInPage />
+          <Suspense fallback={<PageLoadingFallback />}>
+            <StaffLoginPage />
           </Suspense>
         }
       />
+
+      {/* Protegida: solo ADMIN. Ver ProtectedRoute y docs/ARCHITECTURE.md. */}
+      <Route
+        path="/admin"
+        element={
+          <Suspense fallback={<PageLoadingFallback />}>
+            <ProtectedRoute allowedRoles={["ADMIN"]}>
+              <AdminDashboardPage />
+            </ProtectedRoute>
+          </Suspense>
+        }
+      />
+
+      {/* Protegida: ADMIN y VALIDATOR. No linkeada desde la navegación pública. Ver CheckInPage. */}
+      <Route
+        path="/check-in"
+        element={
+          <Suspense fallback={<PageLoadingFallback />}>
+            <ProtectedRoute allowedRoles={["ADMIN", "VALIDATOR"]}>
+              <CheckInPage />
+            </ProtectedRoute>
+          </Suspense>
+        }
+      />
+
       {/* Técnica/temporal, no linkeada desde la navegación pública. Ver AuthDebugPage. */}
       <Route
         path="/auth-debug"
         element={
-          <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#0C0C0C]" />}>
+          <Suspense fallback={<PageLoadingFallback />}>
             <AuthDebugPage />
           </Suspense>
         }

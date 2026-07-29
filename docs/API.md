@@ -23,7 +23,7 @@ Endpoint de salud, sin lógica de negocio.
 
 ## Autenticación (`ADMIN`/`VALIDATOR`)
 
-Etapas 2 y 5 de autenticación y roles (ver `docs/DECISIONS.md`). Los tres endpoints requieren `Authorization: Bearer <Firebase ID Token>` — nunca hay sesión por cookie. **No protegen ni modifican ninguna ruta de negocio existente** (registro General, VIP, check-in, Mercado Pago siguen exactamente igual que antes) y **no interactúan con Mercado Pago** en ningún punto.
+Etapas 2 y 5 de autenticación y roles (ver `docs/DECISIONS.md`). Los tres endpoints requieren `Authorization: Bearer <Firebase ID Token>` — nunca hay sesión por cookie. **No modifican ni interactúan con Mercado Pago** en ningún punto. `POST /api/events/:eventPublicId/check-ins` (más abajo) es la única ruta de negocio protegida por este sistema hasta ahora — registro General, VIP y Mercado Pago siguen exactamente igual que antes, sin autenticación.
 
 ### `POST /api/auth/session`
 
@@ -189,7 +189,7 @@ Cualquier otro error no controlado devuelve 500 con `{ "error": { "code": "INTER
 
 ## `POST /api/events/:eventPublicId/check-ins`
 
-**MVP de desarrollo, no lista para producción** — no existe autenticación de validadores todavía. Solo existe si `ENABLE_MVP_CHECKIN=true` en el backend; si no, esta ruta responde 404 estándar de Express (el router ni se monta). Implementado en `backend/src/modules/check-in/`, detalle completo del flujo en `docs/ARCHITECTURE.md`.
+Protegida con `requireAuth` + `requireRole("ADMIN", "VALIDATOR")` — requiere `Authorization: Bearer <Firebase ID Token>` de un `ADMIN`/`VALIDATOR` ya vinculado (ver la sección de Autenticación más arriba). `CheckIn.validatorUserId` sale siempre de `req.authUser.userId` (el usuario real autenticado) — nunca de un usuario "sistema"/demo. Solo existe si `ENABLE_MVP_CHECKIN=true` en el backend; si no, esta ruta responde 404 estándar de Express (el router ni se monta) — ese flag sigue siendo necesario aunque ya haya autenticación, porque la selección de evento sigue siendo MVP (un único evento demo hardcodeado en el frontend, sin listado real todavía — ver `docs/DECISIONS.md`). Implementado en `backend/src/modules/check-in/`, detalle completo del flujo en `docs/ARCHITECTURE.md`.
 
 ### Body
 
@@ -197,7 +197,7 @@ Cualquier otro error no controlado devuelve 500 con `{ "error": { "code": "INTER
 { "qrPayload": "pulse-ticket:v1:<ticketToken>" }
 ```
 
-`qrPayload` es exactamente el contenido crudo leído del QR (nunca el token por separado, nunca por query string).
+`qrPayload` es exactamente el contenido crudo leído del QR (nunca el token por separado, nunca por query string). Nunca se lee ningún dato de identidad del body — el validador es siempre el del token verificado.
 
 ### Respuesta 200 — intento adjudicado
 
@@ -217,6 +217,8 @@ Cualquier otro error no controlado devuelve 500 con `{ "error": { "code": "INTER
 
 | Status | `code` | Motivo |
 |---|---|---|
+| 401 | `UNAUTHORIZED` | Mismas causas que `GET /api/auth/me` (sin token válido, o sin `User` interno vinculado a ese `firebaseUid`). |
+| 403 | `FORBIDDEN` | `User.status === "BLOCKED"`, o rol distinto de `ADMIN`/`VALIDATOR` (ej. `USER`). |
 | 400 | `VALIDATION_ERROR` | Falta `qrPayload` o no es un string. |
 | 400 | `INVALID_TICKET` | Formato/versión de `qrPayload` inválidos, o el token no corresponde a ningún `Ticket`. No se persiste ningún `CheckIn` en este caso (`CheckIn.ticketId` es obligatorio). |
 | 404 | `EVENT_NOT_FOUND` | No existe ningún `Event` con ese `publicId`. |

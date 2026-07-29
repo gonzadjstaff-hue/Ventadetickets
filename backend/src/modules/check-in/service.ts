@@ -2,15 +2,6 @@ import { prisma } from "../../shared/prisma.js";
 import { hashQrToken, parseQrPayload } from "../../shared/qrToken.js";
 import { EventNotFoundError, InvalidTicketError } from "./errors.js";
 
-/**
- * Usuario "sistema" fijo al que se le atribuye cada CheckIn mientras no
- * existe autenticación de validadores (MVP). Sembrado una sola vez por
- * prisma/seed.ts con este mismo ID exacto — nunca se crea ni se hace upsert
- * por request. Reemplazar por el usuario autenticado real (ej. req.user.id)
- * en cuanto exista un sistema de auth para validadores.
- */
-const DEV_VALIDATOR_USER_ID = "demo-validator-mvp";
-
 export type CheckInResultCode = "VALID" | "ALREADY_USED" | "WRONG_EVENT" | "NOT_PAID" | "CANCELLED";
 
 export interface CheckInOutcome {
@@ -33,6 +24,7 @@ const MESSAGES: Record<CheckInResultCode, string> = {
 export async function checkInTicket(
   eventPublicId: string,
   qrPayload: string,
+  validatorUserId: string,
   deviceInfo?: string,
 ): Promise<CheckInOutcome> {
   const event = await prisma.event.findUnique({ where: { publicId: eventPublicId } });
@@ -57,7 +49,7 @@ export async function checkInTicket(
           // Evento donde se intentó validar (el de la ruta), no necesariamente
           // el evento real del ticket cuando el resultado es WRONG_EVENT.
           eventId: event.id,
-          validatorUserId: DEV_VALIDATOR_USER_ID,
+          validatorUserId,
           result,
           deviceInfo,
         },

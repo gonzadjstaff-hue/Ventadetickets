@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, TicketStatus } from "@prisma/client";
+import type { Prisma, TicketStatus, UserRole } from "@prisma/client";
 
 import { prisma } from "../../src/shared/prisma.js";
 import { generateQrToken } from "../../src/shared/qrToken.js";
@@ -73,19 +73,23 @@ export async function createFixtureUser(overrides: Partial<Prisma.UserCreateInpu
 }
 
 /**
- * Usuario "sistema" fijo para check-in (mismo ID que sembra prisma/seed.ts y
- * que usa DEV_VALIDATOR_USER_ID en modules/check-in/service.ts). upsert
- * porque en tests conviene poder llamarlo varias veces sin duplicar.
+ * Usuario staff (ADMIN/VALIDATOR) ya vinculado a Firebase (`firebaseUid` no
+ * nulo), para tests e2e de rutas protegidas por `requireAuth`/`requireRole`
+ * contra la base de test real — el `firebaseUid` se usa para armar el
+ * `DecodedIdToken` falso que mockea `verifyFirebaseIdToken` (nunca se toca
+ * Firebase real). Ver backend/tests/checkIn.test.ts.
  */
-export async function createFixtureValidatorUser() {
-  return prisma.user.upsert({
-    where: { id: "demo-validator-mvp" },
-    update: {},
-    create: {
-      id: "demo-validator-mvp",
-      email: "validador-mvp@test.pulse.local",
-      displayName: "Validador MVP (demo)",
-      role: "VALIDATOR",
+export async function createFixtureStaffUser(role: Extract<UserRole, "ADMIN" | "VALIDATOR">, overrides: Partial<Prisma.UserCreateInput> = {}) {
+  const suffix = randomUUID().slice(0, 8);
+
+  return prisma.user.create({
+    data: {
+      email: `fixture-staff-${suffix}@test.pulse.local`,
+      displayName: `Fixture Staff ${suffix}`,
+      firebaseUid: `fixture-firebase-uid-${suffix}`,
+      role,
+      status: "ACTIVE",
+      ...overrides,
     },
   });
 }

@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { AuthProvider } from "../features/auth/AuthContext";
 import { useAuth } from "../features/auth/useAuth";
 
 function Shell({ children }: { children: ReactNode }) {
@@ -15,7 +14,16 @@ function Shell({ children }: { children: ReactNode }) {
 const inputClassName =
   "rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[#E8EEF2] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4ADE80]";
 
-function AuthDebugScreen() {
+/**
+ * Pantalla técnica/temporal para validar de punta a punta login → ID Token →
+ * POST /api/auth/session (ver docs/DECISIONS.md). El perfil mostrado sale
+ * siempre del contexto (AuthProvider, montado globalmente en main.tsx), que
+ * es quien llama a POST /api/auth/session y lo guarda — esta pantalla nunca
+ * confía en role/email propios, solo en lo que devuelve el backend. No está
+ * en la navegación pública, no protege ninguna ruta existente, y no es en sí
+ * misma una ruta de login real (ver /staff/login).
+ */
+export default function AuthDebugPage() {
   useEffect(() => {
     document.title = "Auth (técnico) — Pulse Event";
   }, []);
@@ -141,23 +149,5 @@ function AuthDebugScreen() {
         Cerrar sesión
       </button>
     </Shell>
-  );
-}
-
-/**
- * Pantalla técnica/temporal para validar de punta a punta login → ID Token →
- * POST /api/auth/session (ver docs/DECISIONS.md). El perfil mostrado sale
- * siempre del contexto (AuthProvider), que es quien llama a
- * POST /api/auth/session y lo guarda — esta pantalla nunca confía en
- * role/email propios, solo en lo que devuelve el backend. No está en la
- * navegación pública, no protege ninguna ruta existente. AuthProvider se
- * monta acá mismo (no en main.tsx) para que este bloque quede completamente
- * aislado: nada de este código carga a menos que alguien visite /auth-debug.
- */
-export default function AuthDebugPage() {
-  return (
-    <AuthProvider>
-      <AuthDebugScreen />
-    </AuthProvider>
   );
 }

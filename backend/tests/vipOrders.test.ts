@@ -4,18 +4,21 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EmailDeliveryResult } from "../src/integrations/email/types.js";
+import { fakeDecodedToken } from "./helpers/authFixtures.js";
 import {
   cleanupEvent,
   cleanupUserByEmail,
   createFixtureEvent,
   createFixtureOrder,
   createFixtureOrderItem,
+  createFixtureStaffUser,
   createFixtureTicketType,
   createFixtureUser,
 } from "./helpers/fixtures.js";
 
-const { mockedSendGeneralTicketEmail } = vi.hoisted(() => ({
+const { mockedSendGeneralTicketEmail, verifyFirebaseIdTokenMock } = vi.hoisted(() => ({
   mockedSendGeneralTicketEmail: vi.fn<(...args: unknown[]) => Promise<EmailDeliveryResult>>(),
+  verifyFirebaseIdTokenMock: vi.fn(),
 }));
 
 // Mockeado para que estos tests no dependan de red y para poder inspeccionar
@@ -28,6 +31,17 @@ const { mockedSendGeneralTicketEmail } = vi.hoisted(() => ({
 vi.mock("../src/integrations/email/emailService.js", () => ({
   sendGeneralTicketEmail: mockedSendGeneralTicketEmail,
 }));
+
+// Check-in de tickets VIP requiere auth (ver modules/check-in/routes.ts) —
+// solo se mockea verifyFirebaseIdToken (nunca Firebase real); Prisma sigue
+// real, como el resto de este archivo.
+vi.mock("../src/integrations/firebase/firebaseAdmin.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/integrations/firebase/firebaseAdmin.js")>();
+  return {
+    ...original,
+    verifyFirebaseIdToken: verifyFirebaseIdTokenMock,
+  };
+});
 
 const { createApp } = await import("../src/app.js");
 const { prisma } = await import("../src/shared/prisma.js");
@@ -541,8 +555,32 @@ describe("VIP: creación de orden, capacidad, simulador de pago y consulta", () 
   });
 
   describe("check-in de tickets VIP", () => {
+    let validator: Awaited<ReturnType<typeof createFixtureStaffUser>>;
+
+    beforeAll(async () => {
+      validator = await createFixtureStaffUser("VALIDATOR");
+    });
+
+    afterAll(async () => {
+      // Hay que borrar los CheckIn de este validador antes que el propio
+      // usuario (FK CheckIn.validatorUserId) — el afterAll del describe
+      // exterior (cleanupEvent) corre después de este, no antes.
+      await prisma.checkIn.deleteMany({ where: { validatorUserId: validator.id } });
+      await prisma.user.delete({ where: { id: validator.id } });
+    });
+
     function qrPayloadFor(rawToken: string): string {
       return `pulse-ticket:v1:${rawToken}`;
+    }
+
+    function postCheckIn(qrPayload: string) {
+      verifyFirebaseIdTokenMock.mockResolvedValueOnce(
+        fakeDecodedToken({ uid: validator.firebaseUid!, email: validator.email }),
+      );
+      return request(app)
+        .post(`/api/events/${event.publicId}/check-ins`)
+        .set("Authorization", "Bearer token-validator")
+        .send({ qrPayload });
     }
 
     it("VIP Doble: cada ticket se valida de forma independiente; usar uno no afecta al otro; repetir cada uno da ALREADY_USED por separado", async () => {
@@ -554,9 +592,7 @@ describe("VIP: creación de orden, capacidad, simulador de pago y consulta", () 
       const [ticketA, ticketB] = approveRes.body.tickets as Array<{ token: string; ticketPublicId: string; holderName: string }>;
       expect(ticketA.token).not.toBe(ticketB.token);
 
-      const checkInA = await request(app)
-        .post(`/api/events/${event.publicId}/check-ins`)
-        .send({ qrPayload: qrPayloadFor(ticketA.token) });
+      const checkInA = await postCheckIn(qrPayloadFor(ticketA.token));
       expect(checkInA.body.result).toBe("VALID");
       expect(checkInA.body.ticketPublicId).toBe(ticketA.ticketPublicId);
       expect(checkInA.body.holderName).toBe(ticketA.holderName);
@@ -565,22 +601,16 @@ describe("VIP: creación de orden, capacidad, simulador de pago y consulta", () 
       const dbTicketB = await prisma.ticket.findUnique({ where: { publicId: ticketB.ticketPublicId } });
       expect(dbTicketB?.status).toBe("ACTIVE");
 
-      const checkInB = await request(app)
-        .post(`/api/events/${event.publicId}/check-ins`)
-        .send({ qrPayload: qrPayloadFor(ticketB.token) });
+      const checkInB = await postCheckIn(qrPayloadFor(ticketB.token));
       expect(checkInB.body.result).toBe("VALID");
       expect(checkInB.body.ticketPublicId).toBe(ticketB.ticketPublicId);
       expect(checkInB.body.holderName).toBe(ticketB.holderName);
 
-      const repeatA = await request(app)
-        .post(`/api/events/${event.publicId}/check-ins`)
-        .send({ qrPayload: qrPayloadFor(ticketA.token) });
+      const repeatA = await postCheckIn(qrPayloadFor(ticketA.token));
       expect(repeatA.body.result).toBe("ALREADY_USED");
       expect(repeatA.body.ticketPublicId).toBe(ticketA.ticketPublicId);
 
-      const repeatB = await request(app)
-        .post(`/api/events/${event.publicId}/check-ins`)
-        .send({ qrPayload: qrPayloadFor(ticketB.token) });
+      const repeatB = await postCheckIn(qrPayloadFor(ticketB.token));
       expect(repeatB.body.result).toBe("ALREADY_USED");
       expect(repeatB.body.ticketPublicId).toBe(ticketB.ticketPublicId);
     });

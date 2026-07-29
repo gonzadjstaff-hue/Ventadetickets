@@ -90,21 +90,6 @@ async function main() {
     },
   });
 
-  // Usuario "sistema" fijo para atribuir los CheckIn del check-in MVP mientras
-  // no existe autenticación de validadores. Ver DEV_VALIDATOR_USER_ID en
-  // backend/src/modules/check-in/service.ts (mismo ID, a propósito no
-  // importado desde ahí para mantener este script sin dependencias de src/).
-  await prisma.user.upsert({
-    where: { id: "demo-validator-mvp" },
-    update: {},
-    create: {
-      id: "demo-validator-mvp",
-      email: "validador-mvp@pulse.dev",
-      displayName: "Validador MVP (demo)",
-      role: "VALIDATOR",
-    },
-  });
-
   console.log("Seed de desarrollo aplicado: evento 'Pulse Festival 2026' con 3 tipos de entrada.");
 }
 

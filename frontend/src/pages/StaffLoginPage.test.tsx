@@ -1,25 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import { AuthProvider } from "../features/auth/AuthContext";
-import AuthDebugPage from "./AuthDebugPage";
+import StaffLoginPage from "./StaffLoginPage";
 
 /**
  * Aislado por completo de servicios externos: ni el SDK de Firebase ni el
  * backend real se tocan. Se mockea `features/auth/authService` (login/logout/
- * ID Token) y `api/auth` (createSession, POST /api/auth/session) enteros —
- * `createSession` es invocado por AuthProvider (montado acá mismo, ya que en
- * la app real vive globalmente en main.tsx, no dentro de AuthDebugPage).
+ * ID Token) y `api/auth` (createSession) enteros.
  */
-function renderPage() {
-  return render(
-    <AuthProvider>
-      <AuthDebugPage />
-    </AuthProvider>,
-  );
-}
 const { subscribeToAuthStateMock, loginWithEmailMock, logoutMock, getIdTokenMock, createSessionMock } = vi.hoisted(() => ({
   subscribeToAuthStateMock: vi.fn(),
   loginWithEmailMock: vi.fn(),
@@ -40,18 +32,37 @@ vi.mock("../api/auth", () => ({
   createSession: createSessionMock,
 }));
 
-const FAKE_USER = { uid: "uid-1", email: "admin@test.local" };
-const FAKE_SESSION_RESPONSE = {
-  user: { id: "user-1", email: "admin@test.local", role: "ADMIN", status: "ACTIVE" },
-};
+const FAKE_USER = { uid: "uid-1", email: "staff@test.local" };
+
+function adminSessionResponse() {
+  return { user: { id: "user-1", email: "staff@test.local", role: "ADMIN", status: "ACTIVE" } };
+}
+
+function validatorSessionResponse() {
+  return { user: { id: "user-2", email: "staff@test.local", role: "VALIDATOR", status: "ACTIVE" } };
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={["/staff/login"]}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/staff/login" element={<StaffLoginPage />} />
+          <Route path="/admin" element={<div>ADMIN PAGE</div>} />
+          <Route path="/check-in" element={<div>CHECKIN PAGE</div>} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+}
 
 async function submitLoginForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/email/i), "admin@test.local");
-  await user.type(screen.getByLabelText(/contraseña/i), "secret123");
+  await user.type(screen.getByLabelText(/email/i), "staff@test.local");
+  await user.type(screen.getByLabelText("Contraseña"), "secret123");
   await user.click(screen.getByRole("button", { name: /ingresar/i }));
 }
 
-describe("AuthDebugPage", () => {
+describe("StaffLoginPage", () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -65,10 +76,10 @@ describe("AuthDebugPage", () => {
     renderPage();
 
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/contraseña/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Contraseña")).toBeInTheDocument();
   });
 
-  it("login exitoso: llama a loginWithEmail y, tras autenticar, vincula la sesión vía POST /api/auth/session con el Bearer token", async () => {
+  it("login ADMIN: redirige a /admin", async () => {
     let emitUser: ((user: unknown) => void) | undefined;
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       emitUser = callback;
@@ -80,7 +91,7 @@ describe("AuthDebugPage", () => {
       return FAKE_USER;
     });
     getIdTokenMock.mockResolvedValue("id-token-abc");
-    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
+    createSessionMock.mockResolvedValue(adminSessionResponse());
 
     const user = userEvent.setup();
     renderPage();
@@ -88,13 +99,47 @@ describe("AuthDebugPage", () => {
 
     await submitLoginForm(user);
 
-    expect(loginWithEmailMock).toHaveBeenCalledWith("admin@test.local", "secret123");
-    expect(await screen.findByText("ADMIN")).toBeInTheDocument();
-    expect(screen.getByText("ACTIVE")).toBeInTheDocument();
-    expect(createSessionMock).toHaveBeenCalledWith("id-token-abc");
+    expect(await screen.findByText("ADMIN PAGE")).toBeInTheDocument();
   });
 
-  it("error de login: muestra un mensaje claro y nunca llama a POST /api/auth/session", async () => {
+  it("login VALIDATOR: redirige a /check-in", async () => {
+    let emitUser: ((user: unknown) => void) | undefined;
+    subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
+      emitUser = callback;
+      callback(null);
+      return () => {};
+    });
+    loginWithEmailMock.mockImplementation(async () => {
+      emitUser?.(FAKE_USER);
+      return FAKE_USER;
+    });
+    getIdTokenMock.mockResolvedValue("id-token-abc");
+    createSessionMock.mockResolvedValue(validatorSessionResponse());
+
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByLabelText(/email/i);
+
+    await submitLoginForm(user);
+
+    expect(await screen.findByText("CHECKIN PAGE")).toBeInTheDocument();
+  });
+
+  it("sesión ya activa (recarga): redirige de inmediato según el rol, sin mostrar el formulario", async () => {
+    subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
+      callback(FAKE_USER);
+      return () => {};
+    });
+    getIdTokenMock.mockResolvedValue("id-token-abc");
+    createSessionMock.mockResolvedValue(adminSessionResponse());
+
+    renderPage();
+
+    expect(await screen.findByText("ADMIN PAGE")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+  });
+
+  it("error de login (credenciales Firebase inválidas): muestra un mensaje claro, no redirige", async () => {
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       callback(null);
       return () => {};
@@ -108,14 +153,15 @@ describe("AuthDebugPage", () => {
     await submitLoginForm(user);
 
     expect(await screen.findByText(/email o contraseña incorrectos/i)).toBeInTheDocument();
-    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("ADMIN PAGE")).not.toBeInTheDocument();
   });
 
   it.each([
     [401, "No autorizado."],
     [403, "No tenés permisos para realizar esta acción."],
     [409, "Esta cuenta ya está vinculada a otro usuario de Firebase."],
-  ])("error %i de POST /api/auth/session: muestra el mensaje sin romper la pantalla", async (status, message) => {
+    [500, "Ocurrió un error inesperado."],
+  ])("error %i de POST /api/auth/session: muestra el mensaje, vuelve a mostrar el formulario (logout automático)", async (status, message) => {
     let emitUser: ((user: unknown) => void) | undefined;
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
       emitUser = callback;
@@ -128,6 +174,9 @@ describe("AuthDebugPage", () => {
     });
     getIdTokenMock.mockResolvedValue("id-token-abc");
     createSessionMock.mockRejectedValue(new ApiError(status, message, "SOME_CODE"));
+    logoutMock.mockImplementation(async () => {
+      emitUser?.(null);
+    });
 
     const user = userEvent.setup();
     renderPage();
@@ -136,43 +185,28 @@ describe("AuthDebugPage", () => {
     await submitLoginForm(user);
 
     expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
   });
 
-  it("recarga con usuario Firebase existente: rehidrata la sesión automáticamente, sin pasar por el formulario de login", async () => {
+  it("botón mostrar/ocultar contraseña alterna el tipo del input", async () => {
     subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
-      callback(FAKE_USER);
+      callback(null);
       return () => {};
-    });
-    getIdTokenMock.mockResolvedValue("id-token-abc");
-    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
-
-    renderPage();
-
-    expect(await screen.findByText("ADMIN")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
-  });
-
-  it("logout: llama al servicio de logout, limpia el perfil y vuelve a mostrar el formulario de login", async () => {
-    let emitUser: ((user: unknown) => void) | undefined;
-    subscribeToAuthStateMock.mockImplementation((callback: (user: unknown) => void) => {
-      emitUser = callback;
-      callback(FAKE_USER);
-      return () => {};
-    });
-    getIdTokenMock.mockResolvedValue("id-token-abc");
-    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
-    logoutMock.mockImplementation(async () => {
-      emitUser?.(null);
     });
 
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText("ADMIN");
+    await screen.findByLabelText(/email/i);
 
-    await user.click(screen.getByRole("button", { name: /cerrar sesión/i }));
+    const passwordInput = screen.getByLabelText("Contraseña");
+    expect(passwordInput).toHaveAttribute("type", "password");
 
-    expect(logoutMock).toHaveBeenCalledTimes(1);
-    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /mostrar contraseña/i }));
+    expect(passwordInput).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: /ocultar contraseña/i }));
+    expect(passwordInput).toHaveAttribute("type", "password");
   });
 
   it("nunca muestra el ID Token en pantalla", async () => {
@@ -187,13 +221,13 @@ describe("AuthDebugPage", () => {
       return FAKE_USER;
     });
     getIdTokenMock.mockResolvedValue("token-super-secreto-xyz");
-    createSessionMock.mockResolvedValue(FAKE_SESSION_RESPONSE);
+    createSessionMock.mockResolvedValue(adminSessionResponse());
 
     const user = userEvent.setup();
     renderPage();
     await screen.findByLabelText(/email/i);
     await submitLoginForm(user);
-    await screen.findByText("ADMIN");
+    await screen.findByText("ADMIN PAGE");
 
     expect(document.body.textContent).not.toContain("token-super-secreto-xyz");
   });

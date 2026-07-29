@@ -155,7 +155,7 @@ Firebase Authentication es solo para administradores/validadores (ver `docs/DECI
    `USER_ROLE` es obligatoria (`USER`/`VALIDATOR`/`ADMIN`); `USER_STATUS` es opcional, default `ACTIVE`. El script inserta o actualiza (por `email`) un `User` en Postgres con ese `firebaseUid`/`role`/`status`, e imprime el registro resultante — nunca borra nada ni toca otras tablas. Si el `firebaseUid` ya está asignado a otro `email`, corta antes de escribir nada y explica el conflicto.
 4. **Completar `frontend/.env`** con las 6 variables `VITE_FIREBASE_*` (ver "Configuración del proyecto → General → Tus apps" en Firebase Console — son públicas, van en el bundle del cliente, nunca son secretas por sí solas).
 5. **Levantar backend y frontend** (`npm run dev` en ambos, ver secciones 2 y 3 más arriba).
-6. **Abrir `http://localhost:5173/auth-debug`** — pantalla técnica, no linkeada desde la navegación pública (ver `docs/DECISIONS.md`).
+6. **Abrir `http://localhost:5173/auth-debug`** — pantalla técnica, no linkeada desde la navegación pública (ver `docs/DECISIONS.md`). Para probar la pantalla real de staff en vez de la técnica, usar `http://localhost:5173/staff/login` (ver el paso 3 de la sección siguiente).
 7. **Loguearse con el email/contraseña del paso 1** y confirmar que la pantalla muestra `email`/`role`/`status` — esa respuesta viene de `POST /api/auth/session` (ver la sección siguiente para el flujo completo), no de `GET /api/auth/me`.
 
 Ninguna prueba manual real de este flujo se hizo todavía en este entorno — el script existe y está probado con tests unitarios de su lógica de validación (`backend/tests/createTestUserLogic.test.ts`), pero no se corrió contra ninguna base real ni se creó ningún usuario real en Firebase Console.
@@ -177,14 +177,15 @@ El paso 3 de arriba (`createTestUser.ts`) es un atajo de desarrollo: vincula el 
    STAFF_EMAIL=<email> npm run auth:verify-staff-email
    ```
    Uso manual únicamente (no se ejecuta en ningún hook ni automáticamente). Antes de tocar Firebase, confirma que `STAFF_EMAIL` corresponde a un `User` ADMIN/VALIDATOR ya preprovisionado en Postgres — nunca verifica el email de una cuenta arbitraria. Es idempotente: si el email ya estaba verificado, no hace ningún cambio. Nunca imprime UID, email completo, token ni credenciales — solo confirma si quedó marcado como verificado o si ya lo estaba.
-3. **Primer login desde `/auth-debug`** — el frontend ya implementa este flujo completo de punta a punta (verificado de punta a punta en este entorno: Firebase autenticó, `POST /api/auth/session` vinculó la sesión, y el perfil devuelto trajo `role`/`status` correctos):
+3. **Primer login desde `http://localhost:5173/staff/login`** (login real de staff, distinto de `/auth-debug`) — el frontend ya implementa este flujo completo de punta a punta (verificado de punta a punta en este entorno: Firebase autenticó, `POST /api/auth/session` vinculó la sesión, y el perfil devuelto trajo `role`/`status` correctos):
    1. Firebase inicia sesión (`loginWithEmail`).
    2. El frontend obtiene el Firebase ID Token del usuario recién logueado.
    3. Llama a `POST /api/auth/session` con `Authorization: Bearer <token>` (sin body: la única identidad que importa es la del token verificado, nunca datos que el frontend pudiera enviar).
    4. El backend vincula `firebaseUid` al `User` preprovisionado si todavía está en `null` (de forma atómica, con `AuditLog`) — si ya estaba vinculado, resuelve la sesión sin volver a escribir nada.
-   5. La respuesta devuelve el perfil interno (`id`/`email`/`role`/`status`), que la pantalla muestra tal cual — nunca confía en un rol propio ni en datos enviados por el frontend.
+   5. La respuesta devuelve el perfil interno (`id`/`email`/`role`/`status`); `/staff/login` nunca confía en un rol propio ni en datos enviados por el frontend, y redirige automáticamente según `profile.role`: `/admin` si es `ADMIN`, `/check-in` si es `VALIDATOR`.
    6. En recargas de página (con la sesión de Firebase ya persistida por el SDK), el frontend vuelve a llamar `POST /api/auth/session` de forma idempotente para rehidratar el perfil — no hace falta ningún paso manual adicional.
    7. `GET /api/auth/me` sigue disponible para validaciones puntuales posteriores (ya con la sesión vinculada), pero no forma parte del primer login: no lo bloquea ni hace falta llamarlo para que el login funcione.
+4. **Acceder al panel** — un `ADMIN` cae en `http://localhost:5173/admin` (layout inicial: sidebar + header, solo "Resumen" y "Check-in" funcionales, el resto "Próximamente"; requiere `ENABLE_MVP_CHECKIN=true` en `backend/.env` para poder entrar también a `/check-in` desde ahí — ver el paso 5 de la sección 2). Un `VALIDATOR` cae directo en `/check-in`. Entrar a `/admin` sin ser `ADMIN`, o a `/check-in` sin ser `ADMIN`/`VALIDATOR`, muestra "No tenés permisos para acceder a esta sección." (gate de UI — la autoridad real sigue siendo `requireAuth`/`requireRole` en el backend, ver `docs/DECISIONS.md`). Sin sesión, ambas rutas redirigen a `/staff/login`.
 
 ## 8. Despliegue (Vercel + Render)
 

@@ -170,7 +170,14 @@ El paso 3 de arriba (`createTestUser.ts`) es un atajo de desarrollo: vincula el 
    STAFF_EMAIL=<email> STAFF_ROLE=ADMIN STAFF_DISPLAY_NAME="<nombre>" npm run auth:create-staff-user
    ```
 2. **Crear ese mismo email en Firebase Console** (paso 1 de arriba).
-3. **Primer login desde `/auth-debug`** — el frontend ya implementa este flujo completo de punta a punta:
+
+   **Importante — email verificado:** un usuario creado a mano en Firebase Console vía "Authentication → Users → Add user" puede quedar con `emailVerified: false` (Firebase Console no lo marca como verificado por defecto). El backend exige `email_verified === true` de forma estricta en `verifyBearerFirebaseToken.ts` — con el email sin verificar, `POST /api/auth/session` responde 401 aunque el token sea válido y el `User` esté correctamente preprovisionado. Para un usuario staff ya preprovisionado (paso 1 de esta sección), marcarlo como verificado con:
+   ```bash
+   cd backend
+   STAFF_EMAIL=<email> npm run auth:verify-staff-email
+   ```
+   Uso manual únicamente (no se ejecuta en ningún hook ni automáticamente). Antes de tocar Firebase, confirma que `STAFF_EMAIL` corresponde a un `User` ADMIN/VALIDATOR ya preprovisionado en Postgres — nunca verifica el email de una cuenta arbitraria. Es idempotente: si el email ya estaba verificado, no hace ningún cambio. Nunca imprime UID, email completo, token ni credenciales — solo confirma si quedó marcado como verificado o si ya lo estaba.
+3. **Primer login desde `/auth-debug`** — el frontend ya implementa este flujo completo de punta a punta (verificado de punta a punta en este entorno: Firebase autenticó, `POST /api/auth/session` vinculó la sesión, y el perfil devuelto trajo `role`/`status` correctos):
    1. Firebase inicia sesión (`loginWithEmail`).
    2. El frontend obtiene el Firebase ID Token del usuario recién logueado.
    3. Llama a `POST /api/auth/session` con `Authorization: Bearer <token>` (sin body: la única identidad que importa es la del token verificado, nunca datos que el frontend pudiera enviar).

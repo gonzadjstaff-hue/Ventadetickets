@@ -64,6 +64,16 @@ function getFirebaseApp(): App {
 }
 
 /**
+ * Instancia de Firebase Auth (Admin SDK) ya inicializada — reutilizada por
+ * `verifyFirebaseIdToken` y por scripts administrativos (ej.
+ * `scripts/verifyStaffEmail.ts`) que necesitan operar sobre usuarios de
+ * Firebase directamente (gestión, nunca verificación de tokens de terceros).
+ */
+export function getFirebaseAuth() {
+  return getAuth(getFirebaseApp());
+}
+
+/**
  * Verifica un Firebase ID Token contra el proyecto configurado.
  * `checkRevoked: true` hace una llamada adicional a Firebase para confirmar
  * que el token no fue revocado (ej. el usuario fue deshabilitado o cambió su
@@ -71,6 +81,5 @@ function getFirebaseApp(): App {
  * pasaría la verificación igual.
  */
 export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdToken> {
-  const auth = getAuth(getFirebaseApp());
-  return auth.verifyIdToken(idToken, true);
+  return getFirebaseAuth().verifyIdToken(idToken, true);
 }

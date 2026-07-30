@@ -121,12 +121,114 @@ export function getFirebaseAuth() {
 }
 
 /**
+ * Códigos de error que expone `firebase-admin/auth` (siempre con el prefijo
+ * "auth/", ver node_modules/firebase-admin/lib/auth/error.js). El SDK usa el
+ * mismo código genérico `auth/argument-error` tanto para una firma inválida
+ * como para un "aud"/"iss" (proyecto) incorrecto — no hay forma de
+ * distinguir esos dos casos mirando solo `error.code` (confirmado leyendo
+ * `node_modules/firebase-admin/lib/auth/token-verifier.js`, método
+ * `mapJwtErrorToAuthError`/`verifyContent`). Por eso, para ese código puntual,
+ * se decodifica (sin verificar firma) el claim "aud" del propio token y se lo
+ * compara contra `FIREBASE_PROJECT_ID` — nunca se usa `error.message`.
+ */
+const FIREBASE_AUTH_ERROR_CODE = {
+  ID_TOKEN_EXPIRED: "auth/id-token-expired",
+  ID_TOKEN_REVOKED: "auth/id-token-revoked",
+  ARGUMENT_ERROR: "auth/argument-error",
+} as const;
+
+/**
+ * Lee el claim "aud" de un JWT sin verificar su firma ni su validez (nunca se
+ * usa para autenticar ni autorizar nada, solo para diagnóstico interno) y
+ * confirma si coincide con el proyecto de Firebase configurado en el
+ * backend. Devuelve `undefined` si el token no se puede decodificar como JWT
+ * (estructura inesperada) — en ese caso no se puede afirmar nada sobre la
+ * causa real. Nunca imprime el token ni el valor decodificado.
+ */
+function tokenAudienceMatchesConfiguredProject(idToken: string, expectedProjectId: string): boolean | undefined {
+  try {
+    const payloadSegment = idToken.split(".")[1];
+    if (!payloadSegment) return undefined;
+
+    const payload: unknown = JSON.parse(Buffer.from(payloadSegment, "base64url").toString("utf8"));
+    if (typeof payload !== "object" || payload === null || !("aud" in payload)) return undefined;
+
+    const aud = (payload as { aud?: unknown }).aud;
+    return typeof aud === "string" ? aud === expectedProjectId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Diagnóstico temporal (ver SESSION_HANDOFF.md): distingue, solo en los logs
+ * del servidor, por qué el Admin SDK rechazó un ID token — nunca cambia qué
+ * se lanza ni la respuesta HTTP pública (`verifyBearerFirebaseToken.ts` sigue
+ * tratando cualquier rechazo del SDK exactamente igual que antes). Reglas
+ * estrictas: solo `error.code` del SDK (nunca `error.message`), y nunca se
+ * imprime el token, uid, email, projectId, clientEmail, privateKey ni ningún
+ * claim — el resultado de comparar el "aud" contra el proyecto configurado
+ * se usa únicamente para elegir el código a loguear, nunca se imprime el
+ * valor comparado.
+ */
+function logTokenRejectionDiagnostic(idToken: string, error: unknown): void {
+  const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
+
+  if (code === FIREBASE_AUTH_ERROR_CODE.ID_TOKEN_EXPIRED) {
+    console.warn("[auth_session_diag] FIREBASE_TOKEN_EXPIRED");
+    return;
+  }
+  if (code === FIREBASE_AUTH_ERROR_CODE.ID_TOKEN_REVOKED) {
+    console.warn("[auth_session_diag] FIREBASE_TOKEN_REVOKED");
+    return;
+  }
+  if (code === FIREBASE_AUTH_ERROR_CODE.ARGUMENT_ERROR) {
+    const audienceMatches = tokenAudienceMatchesConfiguredProject(idToken, env.FIREBASE_PROJECT_ID ?? "");
+    if (audienceMatches === false) {
+      console.warn("[auth_session_diag] FIREBASE_TOKEN_PROJECT_MISMATCH");
+    } else if (audienceMatches === true) {
+      console.warn("[auth_session_diag] FIREBASE_TOKEN_INVALID_SIGNATURE");
+    } else {
+      console.warn("[auth_session_diag] FIREBASE_TOKEN_OTHER_REJECTION");
+    }
+    return;
+  }
+  console.warn("[auth_session_diag] FIREBASE_TOKEN_OTHER_REJECTION");
+}
+
+/**
  * Verifica un Firebase ID Token contra el proyecto configurado.
  * `checkRevoked: true` hace una llamada adicional a Firebase para confirmar
  * que el token no fue revocado (ej. el usuario fue deshabilitado o cambió su
  * contraseña) — sin esto, un token todavía no vencido pero ya revocado
- * pasaría la verificación igual.
+ * pasaría la verificación igual. Esa misma llamada adicional necesita poder
+ * autenticarse ante Google con la credencial de servicio configurada — si esa
+ * credencial es incoherente (ej. la clave privada no corresponde de verdad a
+ * `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PROJECT_ID`, aunque tenga formato PEM
+ * válido), el rechazo ocurre acá, no en el chequeo de formato de
+ * `firebaseAdmin.ts` ya existente.
  */
 export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdToken> {
-  return getFirebaseAuth().verifyIdToken(idToken, true);
+  let auth: ReturnType<typeof getFirebaseAuth>;
+  try {
+    auth = getFirebaseAuth();
+  } catch (error) {
+    // FirebaseNotConfiguredError ya es un diagnóstico claro y distinto (falta
+    // una variable, o la clave no tiene los marcadores PEM esperados) — no
+    // hace falta duplicar esa señal. Cualquier otro error acá viene de
+    // cert()/initializeApp() con las 3 variables presentes y con formato
+    // válido: la credencial en sí no pudo construirse (ej. contenido de la
+    // clave corrupto más allá de lo que el chequeo de marcadores detecta).
+    if (!(error instanceof FirebaseNotConfiguredError)) {
+      console.warn("[auth_session_diag] FIREBASE_ADMIN_CERT_INIT_FAILED");
+    }
+    throw error;
+  }
+
+  try {
+    return await auth.verifyIdToken(idToken, true);
+  } catch (error) {
+    logTokenRejectionDiagnostic(idToken, error);
+    throw error;
+  }
 }

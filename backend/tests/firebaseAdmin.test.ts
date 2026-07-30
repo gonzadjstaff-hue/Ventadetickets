@@ -226,3 +226,170 @@ describe("firebaseAdmin: inicialización perezosa", () => {
     await expect(verifyFirebaseIdToken("token")).rejects.toBe(sdkError);
   });
 });
+
+/** Construye un JWT sin firmar (header.payload.signature) con el único fin de controlar el claim "aud" en los tests de diagnóstico — nunca se verifica ni se usa para autenticar nada. */
+function buildFakeIdToken(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.fake-signature`;
+}
+
+describe("firebaseAdmin: diagnóstico interno de rechazo de credenciales/tokens", () => {
+  it("loguea FIREBASE_ADMIN_CERT_INIT_FAILED si cert()/initializeApp() lanza con las 3 credenciales presentes y con formato válido", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    certMock.mockImplementationOnce(() => {
+      throw new Error("error interno de la librería de credenciales, con detalle sensible");
+    });
+
+    const { verifyFirebaseIdToken, FirebaseNotConfiguredError } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken("token")).rejects.not.toBeInstanceOf(FirebaseNotConfiguredError);
+    expect(initializeAppMock).not.toHaveBeenCalled();
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_ADMIN_CERT_INIT_FAILED");
+    expect(logged).not.toContain("detalle sensible");
+    warnSpy.mockRestore();
+  });
+
+  it("no loguea diagnóstico de credencial ante FirebaseNotConfiguredError (ya es una señal distinta y suficiente)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    delete process.env.FIREBASE_PROJECT_ID;
+    delete process.env.FIREBASE_CLIENT_EMAIL;
+    delete process.env.FIREBASE_PRIVATE_KEY;
+
+    const { verifyFirebaseIdToken, FirebaseNotConfiguredError } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(FirebaseNotConfiguredError);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("loguea FIREBASE_TOKEN_EXPIRED para auth/id-token-expired", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error("Firebase ID token has expired."), { code: "auth/id-token-expired" }),
+    );
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_EXPIRED");
+    warnSpy.mockRestore();
+  });
+
+  it("loguea FIREBASE_TOKEN_REVOKED para auth/id-token-revoked", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error("Firebase ID token has been revoked."), { code: "auth/id-token-revoked" }),
+    );
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_REVOKED");
+    warnSpy.mockRestore();
+  });
+
+  it('loguea FIREBASE_TOKEN_PROJECT_MISMATCH para auth/argument-error cuando el "aud" del token no coincide con FIREBASE_PROJECT_ID', async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error('Firebase ID token has incorrect "aud" (audience) claim.'), {
+        code: "auth/argument-error",
+      }),
+    );
+    const tokenFromAnotherProject = buildFakeIdToken({ aud: "otro-proyecto-distinto", sub: "uid-1" });
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken(tokenFromAnotherProject)).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_PROJECT_MISMATCH");
+    expect(logged).not.toContain("otro-proyecto-distinto");
+    expect(logged).not.toContain("demo-project");
+    warnSpy.mockRestore();
+  });
+
+  it('loguea FIREBASE_TOKEN_INVALID_SIGNATURE para auth/argument-error cuando el "aud" del token sí coincide con FIREBASE_PROJECT_ID', async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error("Firebase ID token has invalid signature."), { code: "auth/argument-error" }),
+    );
+    const tokenFromConfiguredProject = buildFakeIdToken({ aud: "demo-project", sub: "uid-1" });
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken(tokenFromConfiguredProject)).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_INVALID_SIGNATURE");
+    warnSpy.mockRestore();
+  });
+
+  it("loguea FIREBASE_TOKEN_OTHER_REJECTION para auth/argument-error cuando el token no se puede decodificar (no se puede afirmar mismatch ni firma)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error("Decoding Firebase ID token failed."), { code: "auth/argument-error" }),
+    );
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken("no-es-un-jwt-valido")).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_OTHER_REJECTION");
+    warnSpy.mockRestore();
+  });
+
+  it("loguea FIREBASE_TOKEN_OTHER_REJECTION para cualquier otro código o error sin código reconocido", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error("Error interno inesperado del SDK."), { code: "auth/internal-error" }),
+    );
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).toBe("[auth_session_diag] FIREBASE_TOKEN_OTHER_REJECTION");
+    warnSpy.mockRestore();
+  });
+
+  it("propaga siempre el error original sin envolverlo, aunque se haya logueado un diagnóstico", async () => {
+    setCompleteFirebaseEnv();
+    const sdkError = Object.assign(new Error("Firebase ID token has invalid signature."), {
+      code: "auth/argument-error",
+    });
+    verifyIdTokenMock.mockRejectedValueOnce(sdkError);
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken(buildFakeIdToken({ aud: "demo-project" }))).rejects.toBe(sdkError);
+  });
+
+  it("ningún diagnóstico de esta sección imprime nunca el token, uid, email ni las credenciales configuradas", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setCompleteFirebaseEnv();
+    const secretLookingToken = buildFakeIdToken({ aud: "otro-proyecto-distinto", sub: "uid-secreto-123" });
+    verifyIdTokenMock.mockRejectedValueOnce(
+      Object.assign(new Error('incorrect "aud" claim'), { code: "auth/argument-error" }),
+    );
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await expect(verifyFirebaseIdToken(secretLookingToken)).rejects.toBeInstanceOf(Error);
+
+    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+    expect(logged).not.toContain(secretLookingToken);
+    expect(logged).not.toContain("uid-secreto-123");
+    expect(logged).not.toContain("demo-project");
+    expect(logged).not.toContain("sa@demo-project.iam.gserviceaccount.com");
+    warnSpy.mockRestore();
+  });
+});

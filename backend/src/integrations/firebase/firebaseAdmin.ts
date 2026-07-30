@@ -20,14 +20,50 @@ export class FirebaseNotConfiguredError extends AppError {
 let cachedApp: App | undefined;
 
 /**
+ * Comillas envolventes accidentales (típicamente al copiar el valor completo
+ * del campo `"private_key"` del JSON de la cuenta de servicio, comillas del
+ * JSON incluidas, en vez de solo el contenido de adentro) rompen el formato
+ * PEM antes de poder normalizar los "\n" literales. Solo se quitan si el
+ * valor completo empieza y termina con el mismo tipo de comilla — nunca se
+ * tocan comillas que no envuelven el valor entero (ej. una comilla suelta en
+ * el medio, o comillas asimétricas, quedan tal cual y el error de formato
+ * sigue siendo visible en vez de enmascararse a medias).
+ */
+function stripWrappingQuotes(rawKey: string): string {
+  if (rawKey.length < 2) return rawKey;
+  const first = rawKey[0];
+  const last = rawKey[rawKey.length - 1];
+  const isWrapped = (first === '"' && last === '"') || (first === "'" && last === "'");
+  return isWrapped ? rawKey.slice(1, -1) : rawKey;
+}
+
+/**
  * Las variables de entorno no preservan saltos de línea reales, así que la
  * clave privada PEM suele cargarse con la secuencia literal "\n" en vez de un
  * salto de línea real (Render, Vercel, .env). El SDK de Firebase requiere
  * saltos de línea reales para poder parsear la clave — sin esto, cert()
- * lanza un error de formato antes de poder verificar ningún token.
+ * lanza un error de formato antes de poder verificar ningún token. Las
+ * comillas envolventes se quitan antes de esta conversión, para que la
+ * detección de "\n" literales opere sobre el contenido real de la clave.
  */
 function normalizePrivateKey(rawKey: string): string {
-  return rawKey.includes("\\n") ? rawKey.replace(/\\n/g, "\n") : rawKey;
+  const unquoted = stripWrappingQuotes(rawKey);
+  return unquoted.includes("\\n") ? unquoted.replace(/\\n/g, "\n") : unquoted;
+}
+
+const PEM_PRIVATE_KEY_BEGIN_MARKER = "-----BEGIN PRIVATE KEY-----";
+const PEM_PRIVATE_KEY_END_MARKER = "-----END PRIVATE KEY-----";
+
+/**
+ * Validación mínima de forma, nunca de contenido criptográfico: confirma que,
+ * ya sin comillas envolventes y con los "\n" normalizados, la clave todavía
+ * contiene los marcadores PEM esperados. No prueba que la clave sea
+ * válida/parseable (eso solo lo puede confirmar cert() contra el valor real),
+ * pero sí detecta el caso común de un paste incompleto o de un valor que
+ * directamente no es una clave privada. Nunca imprime el valor evaluado.
+ */
+function hasValidPrivateKeyMarkers(normalizedKey: string): boolean {
+  return normalizedKey.includes(PEM_PRIVATE_KEY_BEGIN_MARKER) && normalizedKey.includes(PEM_PRIVATE_KEY_END_MARKER);
 }
 
 /**
@@ -45,6 +81,17 @@ function getFirebaseApp(): App {
     throw new FirebaseNotConfiguredError();
   }
 
+  const normalizedPrivateKey = normalizePrivateKey(FIREBASE_PRIVATE_KEY);
+  // Mismo error que "falta una variable": desde afuera, una clave con
+  // formato inválido (comillas que no se pudieron quitar del todo, paste
+  // incompleto, valor que no es una clave) es indistinguible de "no
+  // configurado" — ambas son fallas de configuración del servidor (500), no
+  // del cliente. Sin este chequeo, cert() lanzaría más abajo y ese error se
+  // traduciría en un 401 engañoso en verifyBearerFirebaseToken.ts.
+  if (!hasValidPrivateKeyMarkers(normalizedPrivateKey)) {
+    throw new FirebaseNotConfiguredError();
+  }
+
   // Reutiliza una app ya inicializada por otro import si existiera (evita
   // que "app already exists" rompa el arranque si algo más del proceso
   // también llama a initializeApp), en vez de asumir que esta función es la
@@ -56,7 +103,7 @@ function getFirebaseApp(): App {
       credential: cert({
         projectId: FIREBASE_PROJECT_ID,
         clientEmail: FIREBASE_CLIENT_EMAIL,
-        privateKey: normalizePrivateKey(FIREBASE_PRIVATE_KEY),
+        privateKey: normalizedPrivateKey,
       }),
     });
 

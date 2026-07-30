@@ -115,6 +115,75 @@ describe("firebaseAdmin: inicialización perezosa", () => {
     expect(passedKey).toBe(alreadyRealNewlines);
   });
 
+  it("quita comillas dobles envolventes (paste del campo JSON completo, con \\n literales adentro)", async () => {
+    const inner = "-----BEGIN PRIVATE KEY-----\\nAAA\\nBBB\\n-----END PRIVATE KEY-----\\n";
+    setCompleteFirebaseEnv(`"${inner}"`);
+    verifyIdTokenMock.mockResolvedValueOnce({ uid: "uid-1", email: "a@test.pulse.local", email_verified: true });
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await verifyFirebaseIdToken("token");
+
+    const passedKey = (certMock.mock.calls[0]?.[0] as { privateKey: string }).privateKey;
+    expect(passedKey.startsWith('"')).toBe(false);
+    expect(passedKey.endsWith('"')).toBe(false);
+    expect(passedKey).toBe("-----BEGIN PRIVATE KEY-----\nAAA\nBBB\n-----END PRIVATE KEY-----\n");
+  });
+
+  it("quita comillas simples envolventes (clave ya con saltos de línea reales adentro)", async () => {
+    const inner = "-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n";
+    setCompleteFirebaseEnv(`'${inner}'`);
+    verifyIdTokenMock.mockResolvedValueOnce({ uid: "uid-1", email: "a@test.pulse.local", email_verified: true });
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await verifyFirebaseIdToken("token");
+
+    const passedKey = (certMock.mock.calls[0]?.[0] as { privateKey: string }).privateKey;
+    expect(passedKey).toBe(inner);
+  });
+
+  it("no toca comillas que no envuelven el valor completo (asimétricas o en el medio)", async () => {
+    const asymmetric = '"-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n';
+    setCompleteFirebaseEnv(asymmetric);
+    verifyIdTokenMock.mockResolvedValueOnce({ uid: "uid-1", email: "a@test.pulse.local", email_verified: true });
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+    await verifyFirebaseIdToken("token");
+
+    const passedKey = (certMock.mock.calls[0]?.[0] as { privateKey: string }).privateKey;
+    expect(passedKey).toBe(asymmetric);
+  });
+
+  it("rechaza como configuración incompleta (500, nunca 401) una clave sin los marcadores PEM esperados", async () => {
+    setCompleteFirebaseEnv("esto-no-es-una-clave-privada-valida");
+
+    const { verifyFirebaseIdToken, FirebaseNotConfiguredError } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(FirebaseNotConfiguredError);
+    expect(certMock).not.toHaveBeenCalled();
+    expect(initializeAppMock).not.toHaveBeenCalled();
+  });
+
+  it("rechaza como configuración incompleta una clave truncada (falta el marcador END, paste cortado)", async () => {
+    setCompleteFirebaseEnv("-----BEGIN PRIVATE KEY-----\\nAAA\\nBBB");
+
+    const { verifyFirebaseIdToken, FirebaseNotConfiguredError } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken("token")).rejects.toBeInstanceOf(FirebaseNotConfiguredError);
+    expect(certMock).not.toHaveBeenCalled();
+  });
+
+  it("el error de clave con formato inválido no incluye ninguna credencial ni detalle interno en su mensaje", async () => {
+    setCompleteFirebaseEnv("esto-no-es-una-clave-privada-valida");
+
+    const { verifyFirebaseIdToken } = await freshFirebaseAdminModule();
+
+    await expect(verifyFirebaseIdToken("token")).rejects.toMatchObject({
+      code: "FIREBASE_NOT_CONFIGURED",
+      statusCode: 500,
+      message: "La autenticación no está disponible en este momento.",
+    });
+  });
+
   it("inicializa la app una sola vez aunque se verifiquen varios tokens", async () => {
     setCompleteFirebaseEnv();
     verifyIdTokenMock.mockResolvedValue({ uid: "uid-1", email: "a@test.pulse.local", email_verified: true });

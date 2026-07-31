@@ -40,20 +40,13 @@ export async function verifyBearerFirebaseToken(req: Request): Promise<VerifiedF
     // a un 401 genérico: nunca se expone el mensaje crudo del SDK ni ningún
     // detalle del token en la respuesta.
     if (error instanceof AppError) throw error;
-    // Diagnóstico temporal (ver SESSION_HANDOFF.md) para distinguir en los
-    // logs de Render la causa exacta de un 401 en POST /api/auth/session
-    // (compartida con requireAuth, así que también puede aparecer ahí) —
-    // nunca imprime el token, el uid, el email ni el error crudo del SDK.
-    console.warn("[auth_session_diag] AUTH_TOKEN_SDK_REJECTED");
     throw new UnauthorizedError();
   });
 
   if (!decoded.email) {
-    console.warn("[auth_session_diag] AUTH_TOKEN_EMAIL_MISSING");
     throw new UnauthorizedError();
   }
   if (decoded.email_verified !== true) {
-    console.warn("[auth_session_diag] AUTH_TOKEN_EMAIL_NOT_VERIFIED");
     throw new UnauthorizedError();
   }
 

@@ -68,8 +68,7 @@ describe("POST /api/auth/session", () => {
     expect(findUniqueMock).not.toHaveBeenCalled();
   });
 
-  it("responde 401 si el token es inválido (Firebase lo rechaza) y loguea AUTH_TOKEN_SDK_REJECTED sin el error crudo", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("responde 401 si el token es inválido (Firebase lo rechaza) sin exponer el error crudo", async () => {
     verifyFirebaseIdTokenMock.mockRejectedValueOnce(
       Object.assign(new Error("Firebase ID token has invalid signature."), { code: "auth/argument-error" }),
     );
@@ -78,16 +77,9 @@ describe("POST /api/auth/session", () => {
 
     expect(response.status).toBe(401);
     expect(JSON.stringify(response.body)).not.toContain("invalid signature");
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_TOKEN_SDK_REJECTED");
-    expect(logged).not.toContain("invalid signature");
-    expect(logged).not.toContain("token-valido");
-    warnSpy.mockRestore();
   });
 
-  it("responde 401 si el email no está verificado y loguea AUTH_TOKEN_EMAIL_NOT_VERIFIED sin el email", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("responde 401 si el email no está verificado", async () => {
     const decoded = fakeDecodedToken({ email_verified: false });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(decoded);
 
@@ -95,31 +87,18 @@ describe("POST /api/auth/session", () => {
 
     expect(response.status).toBe(401);
     expect(findUniqueMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_TOKEN_EMAIL_NOT_VERIFIED");
-    expect(logged).not.toContain(decoded.email);
-    expect(logged).not.toContain(decoded.uid);
-    warnSpy.mockRestore();
   });
 
-  it("responde 401 si el token no contiene email y loguea AUTH_TOKEN_EMAIL_MISSING sin el uid", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("responde 401 si el token no contiene email", async () => {
     verifyFirebaseIdTokenMock.mockResolvedValueOnce({ uid: "uid-sin-email", email_verified: true });
 
     const response = await postSession();
 
     expect(response.status).toBe(401);
     expect(findUniqueMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_TOKEN_EMAIL_MISSING");
-    expect(logged).not.toContain("uid-sin-email");
-    warnSpy.mockRestore();
   });
 
-  it("caso A — User ya vinculado y ACTIVE: devuelve el perfil sin escribir nada, loguea AUTH_SESSION_LINKED_OK", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso A — User ya vinculado y ACTIVE: devuelve el perfil sin escribir nada", async () => {
     const user = fakeUser({ role: "ADMIN", status: "ACTIVE" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: user.firebaseUid!, email: user.email }));
     findUniqueMock.mockResolvedValueOnce(user); // findUnique por firebaseUid
@@ -134,16 +113,9 @@ describe("POST /api/auth/session", () => {
     expect(findUniqueMock).toHaveBeenCalledWith({ where: { firebaseUid: user.firebaseUid } });
     expect(transactionMock).not.toHaveBeenCalled();
     expect(auditLogCreateMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_SESSION_LINKED_OK");
-    expect(logged).not.toContain(user.email);
-    expect(logged).not.toContain(user.firebaseUid!);
-    warnSpy.mockRestore();
   });
 
-  it("caso A — User ya vinculado y BLOCKED: 403, loguea AUTH_STAFF_BLOCKED sin el email", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso A — User ya vinculado y BLOCKED: 403", async () => {
     const user = fakeUser({ status: "BLOCKED" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: user.firebaseUid!, email: user.email }));
     findUniqueMock.mockResolvedValueOnce(user);
@@ -155,15 +127,9 @@ describe("POST /api/auth/session", () => {
       error: { code: "FORBIDDEN", message: "No tenés permisos para realizar esta acción." },
     });
     expect(transactionMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_STAFF_BLOCKED");
-    expect(logged).not.toContain(user.email);
-    warnSpy.mockRestore();
   });
 
-  it("caso B — User inexistente (ni por firebaseUid ni por email): 401 genérico, loguea AUTH_STAFF_NOT_FOUND sin el email", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso B — User inexistente (ni por firebaseUid ni por email): 401 genérico", async () => {
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: "uid-nuevo", email: "nadie@test.pulse.local" }));
     findUniqueMock.mockResolvedValueOnce(null); // por firebaseUid
     findUniqueMock.mockResolvedValueOnce(null); // por email
@@ -173,15 +139,9 @@ describe("POST /api/auth/session", () => {
     expect(response.status).toBe(401);
     expect(response.body).toEqual({ error: { code: "UNAUTHORIZED", message: "No autorizado." } });
     expect(transactionMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_STAFF_NOT_FOUND");
-    expect(logged).not.toContain("nadie@test.pulse.local");
-    warnSpy.mockRestore();
   });
 
-  it("caso B — User preprovisionado por email, BLOCKED: 403 sin vincular, loguea AUTH_STAFF_BLOCKED", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso B — User preprovisionado por email, BLOCKED: 403 sin vincular", async () => {
     const preprovisioned = fakeUser({ firebaseUid: null, status: "BLOCKED" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(
       fakeDecodedToken({ uid: "uid-nuevo", email: preprovisioned.email }),
@@ -193,15 +153,9 @@ describe("POST /api/auth/session", () => {
 
     expect(response.status).toBe(403);
     expect(transactionMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_STAFF_BLOCKED");
-    expect(logged).not.toContain(preprovisioned.email);
-    warnSpy.mockRestore();
   });
 
-  it("caso B — User con otro firebaseUid ya asignado: 409, sin mencionar el otro uid ni escribir nada, loguea AUTH_FIREBASE_UID_CONFLICT", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso B — User con otro firebaseUid ya asignado: 409, sin mencionar el otro uid ni escribir nada", async () => {
     const other = fakeUser({ firebaseUid: "uid-de-otra-cuenta", status: "ACTIVE" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: "uid-atacante", email: other.email }));
     findUniqueMock.mockResolvedValueOnce(null); // por firebaseUid (uid-atacante no existe)
@@ -215,17 +169,9 @@ describe("POST /api/auth/session", () => {
     });
     expect(JSON.stringify(response.body)).not.toContain("uid-de-otra-cuenta");
     expect(transactionMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_FIREBASE_UID_CONFLICT");
-    expect(logged).not.toContain("uid-de-otra-cuenta");
-    expect(logged).not.toContain("uid-atacante");
-    expect(logged).not.toContain(other.email);
-    warnSpy.mockRestore();
   });
 
-  it("caso B — preprovisionado con firebaseUid null: vinculación exitosa, AuditLog creado, respuesta correcta, loguea AUTH_SESSION_LINKED_OK", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("caso B — preprovisionado con firebaseUid null: vinculación exitosa, AuditLog creado, respuesta correcta", async () => {
     const preprovisioned = fakeUser({ firebaseUid: null, role: "VALIDATOR", status: "ACTIVE" });
     const linked = { ...preprovisioned, firebaseUid: "uid-nuevo" };
 
@@ -243,12 +189,6 @@ describe("POST /api/auth/session", () => {
     expect(response.body).toEqual({
       user: { id: linked.id, email: linked.email, role: "VALIDATOR", status: "ACTIVE" },
     });
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_SESSION_LINKED_OK");
-    expect(logged).not.toContain("uid-nuevo");
-    expect(logged).not.toContain(preprovisioned.email);
-    warnSpy.mockRestore();
 
     // Vinculación atómica por id + firebaseUid: null.
     expect(updateManyMock).toHaveBeenCalledWith({
@@ -269,8 +209,7 @@ describe("POST /api/auth/session", () => {
     expect(JSON.stringify(auditCall)).not.toContain("token-valido");
   });
 
-  it("conflicto concurrente — perdió la carrera y el ganador fue OTRO firebaseUid: 409, loguea AUTH_FIREBASE_UID_CONFLICT", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("conflicto concurrente — perdió la carrera y el ganador fue OTRO firebaseUid: 409", async () => {
     const preprovisioned = fakeUser({ firebaseUid: null, status: "ACTIVE" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: "uid-mio", email: preprovisioned.email }));
     findUniqueMock.mockResolvedValueOnce(null);
@@ -282,15 +221,9 @@ describe("POST /api/auth/session", () => {
 
     expect(response.status).toBe(409);
     expect(auditLogCreateMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_FIREBASE_UID_CONFLICT");
-    expect(logged).not.toContain("uid-de-otra-request");
-    warnSpy.mockRestore();
   });
 
-  it("conflicto concurrente — perdió la carrera pero el ganador fue la MISMA request (mismo uid): 200, sin duplicar el AuditLog, loguea AUTH_SESSION_LINKED_OK", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("conflicto concurrente — perdió la carrera pero el ganador fue la MISMA request (mismo uid): 200, sin duplicar el AuditLog", async () => {
     const preprovisioned = fakeUser({ firebaseUid: null, status: "ACTIVE" });
     verifyFirebaseIdTokenMock.mockResolvedValueOnce(fakeDecodedToken({ uid: "uid-mio", email: preprovisioned.email }));
     findUniqueMock.mockResolvedValueOnce(null);
@@ -302,10 +235,6 @@ describe("POST /api/auth/session", () => {
 
     expect(response.status).toBe(200);
     expect(auditLogCreateMock).not.toHaveBeenCalled();
-
-    const logged = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-    expect(logged).toContain("AUTH_SESSION_LINKED_OK");
-    warnSpy.mockRestore();
   });
 
   it("el rol de la respuesta siempre sale de Postgres, nunca del token", async () => {

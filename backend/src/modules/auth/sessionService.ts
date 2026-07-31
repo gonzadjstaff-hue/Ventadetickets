@@ -28,7 +28,6 @@ export async function resolveOrLinkStaffUser(input: LinkFirebaseSessionInput): P
   const byFirebaseUid = await prisma.user.findUnique({ where: { firebaseUid: input.firebaseUid } });
   if (byFirebaseUid) {
     if (byFirebaseUid.status === "BLOCKED") {
-      console.warn("[auth_session_diag] AUTH_STAFF_BLOCKED");
       throw new ForbiddenError();
     }
     return byFirebaseUid;
@@ -41,15 +40,12 @@ export async function resolveOrLinkStaffUser(input: LinkFirebaseSessionInput): P
     // preprovisionado explícitamente. El mismo 401 genérico que cualquier
     // otra causa de "no autorizado" — no confirma ni descarta que el email
     // exista en otro estado.
-    console.warn("[auth_session_diag] AUTH_STAFF_NOT_FOUND");
     throw new UnauthorizedError();
   }
   if (byEmail.status === "BLOCKED") {
-    console.warn("[auth_session_diag] AUTH_STAFF_BLOCKED");
     throw new ForbiddenError();
   }
   if (byEmail.firebaseUid && byEmail.firebaseUid !== input.firebaseUid) {
-    console.warn("[auth_session_diag] AUTH_FIREBASE_UID_CONFLICT");
     throw new FirebaseUidConflictError();
   }
   if (byEmail.firebaseUid === input.firebaseUid) {
@@ -93,7 +89,6 @@ export async function resolveOrLinkStaffUser(input: LinkFirebaseSessionInput): P
     // sin duplicar el AuditLog) o una con un uid distinto (conflicto real).
     const current = await tx.user.findUniqueOrThrow({ where: { id: byEmail.id } });
     if (current.firebaseUid !== input.firebaseUid) {
-      console.warn("[auth_session_diag] AUTH_FIREBASE_UID_CONFLICT");
       throw new FirebaseUidConflictError();
     }
     return current;

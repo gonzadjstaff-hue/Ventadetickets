@@ -47,11 +47,6 @@ export async function postSession(req: Request, res: Response, next: NextFunctio
   try {
     const { uid, email } = await verifyBearerFirebaseToken(req);
     const user = await resolveOrLinkStaffUser({ firebaseUid: uid, email });
-    // Diagnóstico temporal (ver SESSION_HANDOFF.md) — único punto de éxito,
-    // cubre los 4 caminos internos que terminan en sesión resuelta/vinculada
-    // sin tener que tocar sessionService.ts. Nunca imprime el uid, el email
-    // ni ningún dato del User.
-    console.warn("[auth_session_diag] AUTH_SESSION_LINKED_OK");
 
     res.status(200).json({
       user: { id: user.id, email: user.email, role: user.role, status: user.status },
